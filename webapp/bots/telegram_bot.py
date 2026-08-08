@@ -101,8 +101,16 @@ class TelegramBot:
         return {"ok": True, "message": "Da dung bot"}
 
     def _poll_loop(self) -> None:
-        """Vòng lặp getUpdates: nhận tin nhắn text -> phân tích -> reply."""
+        """
+        Vòng lặp getUpdates: nhận tin nhắn text -> phân tích -> reply.
+
+        Logic:
+          - Lỗi 409 "webhook is active" -> tự gỡ webhook 1 lần rồi poll tiếp
+            (giống Zalo: polling và webhook loại trừ nhau)
+          - Lỗi khác -> log + dừng bot
+        """
         offset = 0
+        webhook_retried = False
         while not self._stop_event.is_set():
             try:
                 resp = requests.post(
@@ -115,9 +123,16 @@ class TelegramBot:
                 time.sleep(5)
                 continue
             if not resp.get("ok"):
-                self._log(f"[poll] Loi API: {resp.get('description')} - dung bot")
+                description = resp.get("description", "")
+                if "webhook" in description.lower() and not webhook_retried:
+                    self._log("Webhook dang cai - tu go va tiep tuc polling")
+                    requests.post(f"{API_BASE}/bot{self._token()}/deleteWebhook", timeout=15)
+                    webhook_retried = True
+                    continue
+                self._log(f"[poll] Loi API: {description} - dung bot")
                 self._stop_event.set()
                 break
+            webhook_retried = False
             for update in resp.get("result", []):
                 offset = update.get("update_id", 0) + 1
                 message = update.get("message") or {}

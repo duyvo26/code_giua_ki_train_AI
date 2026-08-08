@@ -50,6 +50,11 @@ class ZaloBot:
         """
         Gọi API Zalo: POST {api_base}/bot{token}/{method}.
         Token nằm trong URL path (chuẩn Bot Creator).
+
+        Logic:
+          - Response luôn là JSON {ok: true/false, error_code, description}
+          - Nếu server trả không phải JSON (vd trang 404 HTML) -> trả
+            dict lỗi chuẩn thay vì để exception crash bot thread
         """
         cfg = self._cfg()
         token = cfg["token"].strip()
@@ -59,7 +64,31 @@ class ZaloBot:
             json=body,
             timeout=35,
         )
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError:
+            return {
+                "ok": False,
+                "error_code": resp.status_code,
+                "description": f"HTTP {resp.status_code} - {resp.text[:120]}",
+            }
+
+    def get_webhook_info(self) -> dict:
+        """Đọc webhook đang cài (nếu có) - dùng để gỡ trước khi polling."""
+        try:
+            return self._call("getWebhookInfo")
+        except requests.RequestException as exc:
+            return {"ok": False, "description": f"Loi mang: {exc}"}
+
+    def delete_webhook(self) -> dict:
+        """
+        Gỡ webhook - Zalo KHÔNG cho polling khi webhook đang cài
+        (lỗi 400 "You cannot use this API while a webhook is set").
+        """
+        try:
+            return self._call("deleteWebhook")
+        except requests.RequestException as exc:
+            return {"ok": False, "description": f"Loi mang: {exc}"}
 
     # ---------- API ----------
     def get_me(self) -> dict:
@@ -73,7 +102,8 @@ class ZaloBot:
             return {"ok": False, "error": f"Loi mang (kiem tra API base): {exc}"}
         if not data.get("ok"):
             return {"ok": False, "error": data.get("description", "Token/API base khong hop le")}
-        return {"ok": True, "bot_name": data.get("name", "")}
+        result = data.get("result") or {}
+        return {"ok": True, "bot_name": result.get("display_name") or result.get("name") or ""}
 
     def send(self, chat_id: str, text: str) -> bool:
         """Gửi text tới chat_id, chunk 2000 ký tự."""
@@ -91,12 +121,27 @@ class ZaloBot:
 
     # ---------- vòng lặp nhận tin ----------
     def start(self) -> dict:
-        """Bật polling thread. Từ chối nếu chưa có token hoặc đang chạy."""
+        """
+        Bật polling thread. Từ chối nếu chưa có token hoặc đang chạy.
+
+        Logic:
+          - Kiểm tra token bằng getMe trước
+          - Tự gỡ webhook nếu đang cài (Zalo chặn getUpdates khi có webhook)
+        """
         if self.is_running:
             return {"ok": False, "error": "Bot dang chay roi"}
         check = self.get_me()
         if not check["ok"]:
             return {"ok": False, "error": check["error"]}
+
+        webhook_info = self.get_webhook_info()
+        webhook_url = (webhook_info.get("result") or {}).get("url", "")
+        if webhook_url:
+            self._log(f"Phat hien webhook dang cai ({webhook_url}) - tu go de dung polling")
+            removed = self.delete_webhook()
+            if not removed.get("ok"):
+                self._log(f"[warn] Go webhook that bai: {removed.get('description')}")
+
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
@@ -131,7 +176,16 @@ class ZaloBot:
         return {"chat_id": str(chat_id), "text": text}
 
     def _poll_loop(self) -> None:
-        """Vòng lặp getUpdates (1 update/call): phân tích -> reply."""
+        """
+        Vòng lặp getUpdates (1 update/call): phân tích -> reply.
+
+        Logic:
+          - error_code 408 (Request timeout) = long-polling hết hạn,
+            KHÔNG có tin mới -> tiếp tục vòng lặp (không phải lỗi)
+          - error_code 400 "webhook" = webhook còn cài -> gỡ 1 lần rồi tiếp tục
+          - Lỗi khác -> log + dừng bot (tránh spam API)
+        """
+        webhook_retried = False
         while not self._stop_event.is_set():
             try:
                 data = self._call("getUpdates", {"timeout": "30"})
@@ -139,10 +193,22 @@ class ZaloBot:
                 self._log(f"[poll] Loi mang: {exc} - thu lai 5s")
                 time.sleep(5)
                 continue
+
             if not data.get("ok"):
-                self._log(f"[poll] Loi API: {data.get('description')} - dung bot")
+                error_code = data.get("error_code")
+                description = data.get("description", "")
+                if error_code == 408:
+                    # long-polling hết thời gian chờ - bình thường, poll tiếp
+                    continue
+                if error_code == 400 and "webhook" in description.lower() and not webhook_retried:
+                    self._log("Webhook dang cai - tu go va tiep tuc polling")
+                    self.delete_webhook()
+                    webhook_retried = True
+                    continue
+                self._log(f"[poll] Loi API ({error_code}): {description} - dung bot")
                 self._stop_event.set()
                 break
+            webhook_retried = False
 
             parsed = self._parse_update(data)
             if parsed is None:
