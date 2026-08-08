@@ -1,8 +1,8 @@
 """
-Thực nghiệm 3 - Fine-tuning PhoBERT-base trên dữ liệu UIT-VSFC.
+Thực nghiệm 3 - Fine-tuning PhoBERT-base-v2 trên dữ liệu UIT-VSFC.
 
 Quy trình:
-1. Tải tokenizer + mô hình pretrained `vinai/phobert-base`.
+1. Tải tokenizer + mô hình pretrained `vinai/phobert-base-v2`.
 2. Gắn classification head 3 lớp (Negative/Neutral/Positive).
 3. Tokenize: text -> input_ids + attention_mask.
 4. Huấn luyện bằng Trainer (Cross-Entropy, FP16 trên GPU).
@@ -36,7 +36,7 @@ from .config import (
     TRANSFORMER_MODEL,
 )
 
-MODEL_NAME = "PhoBERT-base (fine-tuned)"
+MODEL_NAME = "PhoBERT-base-v2 (fine-tuned)"
 
 
 class SentimentDataset(Dataset):

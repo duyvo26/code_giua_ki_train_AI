@@ -29,7 +29,7 @@ code_giua_ki_train_AI/
 | `scripts/config.py` | Config | Model, nhãn, đường dẫn, siêu tham số |
 | `scripts/preprocess.py` | Pipeline | Tải UIT-VSFC, làm sạch, gán nhãn (Bước 1-3) |
 | `scripts/baseline.py` | Baseline | TF-IDF + Logistic Regression (Thực nghiệm 1) |
-| `scripts/finetune.py` | Training | Fine-tune PhoBERT-base (Thực nghiệm 3) |
+| `scripts/finetune.py` | Training | Fine-tune PhoBERT-base-v2 (Thực nghiệm 3) |
 | `scripts/evaluate.py` | Evaluation | Metrics, confusion matrix, PR curve, so sánh |
 
 ## Luồng dữ liệu

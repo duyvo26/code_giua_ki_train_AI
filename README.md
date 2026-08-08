@@ -15,7 +15,7 @@ Thực nghiệm xây dựng **hệ thống phân loại cảm xúc bình luận 
 | Bộ dữ liệu | **UIT-VSFC** (Vietnamese Students' Feedback Corpus, KSE 2018) — ~11.000 bình luận |
 | Bài toán | Phân loại 3 lớp: Negative (0) / Neutral (1) / Positive (2) |
 | Baseline | TF-IDF + Logistic Regression |
-| Transformer | **PhoBERT-base** (`vinai/phobert-base`) fine-tune bằng Hugging Face `Trainer` |
+| Transformer | **PhoBERT-base-v2** (`vinai/phobert-base-v2`) fine-tune bằng Hugging Face `Trainer` |
 | Chia dữ liệu | Train/Valid/Test chính thức theo paper (~80/10/10), test tách biệt tuyệt đối |
 | Môi trường | Google Colab GPU (T4), FP16 |
 | Triển khai | FastAPI nội bộ (không gửi dữ liệu ra ngoài) |
@@ -30,7 +30,7 @@ Thực nghiệm xây dựng **hệ thống phân loại cảm xúc bình luận 
            ↓                          ↓                          ↓
 ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
 │ 4. Tokenizer         │ → │ 5. Chia dữ liệu      │ → │ 6. Fine-tuning       │
-│ PhoBERT → input_ids  │   │ Train/Valid/Test     │   │ PhoBERT-base (GPU)   │
+│ PhoBERT → input_ids  │   │ Train/Valid/Test     │   │ PhoBERT-base-v2 (GPU) │
 └──────────┬───────────┘   └──────────┬───────────┘   └──────────┬───────────┘
            ↓                          ↓                          ↓
 ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
@@ -44,8 +44,8 @@ Thực nghiệm xây dựng **hệ thống phân loại cảm xúc bình luận 
 | # | Thực nghiệm | Mô hình | Cách chạy |
 |---|---|---|---|
 | 1 | Baseline | TF-IDF + Logistic Regression | `scripts/baseline.py` |
-| 2 | Transformer sẵn có (đối chứng) | `dangvantuan/vietnamese-sentiment` (PhoBERT fine-tuned sẵn) | không huấn luyện |
-| 3 | **Fine-tuning** | `vinai/phobert-base` trên UIT-VSFC | `scripts/finetune.py` |
+| 2 | Transformer sẵn có (đối chứng) | `wonrax/phobert-base-vietnamese-sentiment` (PhoBERT fine-tuned sẵn) | không huấn luyện |
+| 3 | **Fine-tuning** | `vinai/phobert-base-v2` trên UIT-VSFC | `scripts/finetune.py` |
 
 ## 3. Cấu trúc repo
 
@@ -73,11 +73,12 @@ code_giua_ki_train_AI/
 
 1. Mở `sentiment_colab.ipynb` bằng Colab: `https://github.com/duyvo26/code_giua_ki_train_AI`.
 2. Chọn **Runtime → Change runtime type → T4 GPU**.
-3. Chạy lần lượt các cell **Runtime → Run all** (repo tự clone từ GitHub).
+3. (Tùy chọn) Nếu dùng model gated: biểu tượng khoá bên trái → **+ New secret** → tên `HF_TOKEN`, giá trị là token tại https://huggingface.co/settings/tokens (không bắt buộc — 2 model mặc định đều public).
+4. Chạy lần lượt các cell **Runtime → Run all** (repo tự clone từ GitHub).
 
 ```text
 Dữ liệu UIT-VSFC → Tiền xử lý → Baseline TF-IDF+LR → PhoBERT sẵn có
-→ Fine-tune PhoBERT (~15-20 phút) → Đánh giá & so sánh → Demo inference
+→ Fine-tune PhoBERT-base-v2 (~15-20 phút) → Đánh giá & so sánh → Demo inference
 → Web demo Flask + Cloudflared (link public) → Kết quả lưu vào results/ và models/
 ```
 
@@ -125,7 +126,7 @@ Khách hàng → Website/App → Flask (Transformer cục bộ) → Negative/Pos
 |---|---|---|---|---|---|
 | TF-IDF + Logistic Regression | … | … | … | … | … |
 | PhoBERT fine-tuned sẵn (tham chiếu) | … | … | … | … | … |
-| **PhoBERT-base fine-tuned** | … | … | … | … | … |
+| **PhoBERT-base-v2 fine-tuned** | … | … | … | … | … |
 
 > Số liệu lấy từ `results/compare_table.md` sau khi chạy notebook. **Không cam kết >95%** — báo cáo số đo thực tế trên tập test.
 
@@ -135,10 +136,10 @@ Khách hàng → Website/App → Flask (Transformer cục bộ) → Negative/Pos
 2. **Không xoá stopword:** Transformer tận dụng ngữ cảnh toàn câu; tiền xử lý chỉ chuẩn hóa encoding/khoảng trắng/bỏ rỗng/dup.
 3. **Test set cách ly tuyệt đối**, chỉ dùng 1 lần cuối cùng.
 4. **Đối chứng 3 mức** (truyền thống → Transformer sẵn có → Transformer fine-tune) là phần thuyết phục nhất của báo cáo.
-5. Thực nghiệm 2 dùng mô hình công khai `dangvantuan/vietnamese-sentiment` (PhoBERT fine-tuned trên UIT-VSFC) — chỉ mang tính tham chiếu.
+5. Thực nghiệm 2 dùng mô hình công khai `wonrax/phobert-base-vietnamese-sentiment` (PhoBERT fine-tuned sẵn) — chỉ mang tính tham chiếu; thứ tự nhãn của model được align tự động về chuẩn 0=Neg/1=Neu/2=Pos khi đánh giá.
 
 ## 8. Tài liệu tham khảo
 
 - Van Nguyen, K., et al. *UIT-VSFC: Vietnamese students' feedback corpus for sentiment analysis.* KSE 2018.
 - Nguyen, D. Q., & Nguyen, A. T. *PhoBERT: Pre-trained language models for Vietnamese.* EMNLP Findings 2020.
-- Hugging Face: [ura-hcmut/UIT-VSFC](https://huggingface.co/datasets/ura-hcmut/UIT-VSFC), [vinai/phobert-base](https://huggingface.co/vinai/phobert-base), [dangvantuan/vietnamese-sentiment](https://huggingface.co/dangvantuan/vietnamese-sentiment).
+- Hugging Face: [ura-hcmut/UIT-VSFC](https://huggingface.co/datasets/ura-hcmut/UIT-VSFC), [vinai/phobert-base-v2](https://huggingface.co/vinai/phobert-base-v2), [wonrax/phobert-base-vietnamese-sentiment](https://huggingface.co/wonrax/phobert-base-vietnamese-sentiment).
