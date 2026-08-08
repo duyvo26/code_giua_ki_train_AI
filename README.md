@@ -2,7 +2,7 @@
 
 **Trường Đại học Nam Cần Thơ — Môn: Máy học nâng cao (25MIT-1A)**
 **Giảng viên hướng dẫn:** TS. Huỳnh Văn Huy
-**Nhóm:** Võ Khương Duy (2513464) · Nguyễn Thị Mai Hân (2513562) · Nguyễn Minh Nhựt (2513525)
+**Thực hiện (cá nhân, không nhóm):** Võ Khương Duy (2513464)
 
 ---
 
