@@ -19,11 +19,11 @@ FIGURE_DIR = RESULTS_DIR / "figures"
 
 # --- Mô hình ------------------------------------------------------------
 # Mô hình Transformer tiếng Việt được fine-tune lại (Thực nghiệm 3)
-TRANSFORMER_MODEL = "vinai/phobert-base"
+TRANSFORMER_MODEL = "vinai/phobert-base-v2"
 
 # Mô hình PhoBERT đã được fine-tune sẵn, dùng làm đối chứng
 # (Thực nghiệm 2) - không huấn luyện thêm
-PUBLIC_SENTIMENT_MODEL = "dangvantuan/vietnamese-sentiment"
+PUBLIC_SENTIMENT_MODEL = "wonrax/phobert-base-vietnamese-sentiment"
 
 # --- Nhãn ---------------------------------------------------------------
 # 0 = Negative, 1 = Neutral, 2 = Positive

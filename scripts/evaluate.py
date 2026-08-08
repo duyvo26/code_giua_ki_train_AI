@@ -214,10 +214,16 @@ def evaluate_transformer(
     df_test: pd.DataFrame,
     batch_size: int = 32,
     model_name: str = "transformer",
+    id2label: dict | None = None,
 ) -> tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
     """
     Chạy Transformer trên tập test, trả về (metrics, y_true, y_pred, proba).
     Dùng chung cho Thực nghiệm 2 (model sẵn có) và Thực nghiệm 3 (fine-tuned).
+
+    Args:
+        id2label (dict | None): id2label của model (model.config.id2label).
+            Model sẵn có có thể có thứ tự nhãn khác chuẩn của dự án
+            (vd {0:'NEG',1:'POS',2:'NEU'}) nên cần align về 0=neg/1=neu/2=pos.
     """
     import torch
     from torch.utils.data import DataLoader
@@ -250,5 +256,44 @@ def evaluate_transformer(
     proba = proba / proba.sum(axis=1, keepdims=True)
     y_pred = proba.argmax(axis=1)
 
+    # Nếu model có id2label riêng, align y_pred + proba về thứ tự chuẩn
+    if id2label is not None:
+        y_pred, proba = _align_labels(y_pred, proba, id2label)
+
     metrics = compute_metrics(y_true, y_pred, model_name=model_name)
     return metrics, y_true, y_pred, proba
+
+
+def _align_labels(
+    y_pred: np.ndarray,
+    proba: np.ndarray,
+    id2label: dict,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Đưa dự đoán của model về id chuẩn: 0=negative, 1=neutral, 2=positive.
+
+    Logic:
+      - Đọc id2label của model, chuẩn hoá tên nhãn (lowercase, NEG->negative...)
+      - Lớp có tên 'pos'/'pos' viết tắt được map qua dict short
+      - y_pred: thay id cũ bằng id chuẩn tương ứng
+      - proba: hoán vị cột theo thứ tự chuẩn để PR curve đúng từng lớp
+    """
+    from .config import LABEL_TO_ID
+
+    short_names = {"neg": "negative", "pos": "positive", "neu": "neutral"}
+    idx_to_canon: dict[int, int] = {}
+    for idx in range(proba.shape[1]):
+        name = str(id2label.get(str(idx), "")).lower().strip()
+        if name in short_names:
+            name = short_names[name]
+        if name not in LABEL_TO_ID:
+            raise ValueError(f"Khong map duoc nhan cua model '{name}' (idx={idx})")
+        idx_to_canon[idx] = LABEL_TO_ID[name]
+    if sorted(idx_to_canon.values()) != [0, 1, 2]:
+        raise ValueError(f"id2label cua model thieu lop: {id2label}")
+
+    y_pred = np.array([idx_to_canon[int(i)] for i in y_pred])
+    proba_aligned = np.zeros((proba.shape[0], 3), dtype=proba.dtype)
+    for idx, canon in idx_to_canon.items():
+        proba_aligned[:, canon] = proba[:, idx]
+    return y_pred, proba_aligned
