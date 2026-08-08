@@ -25,13 +25,18 @@ from scripts.config import (  # noqa: E402
 )
 from scripts.preprocess import prepare_dataset  # noqa: E402
 
+# Trainer v5 yêu cầu callback kế thừa TrainerCallback, nếu không sẽ
+# AttributeError on_init_end khi Trainer gọi các hook (lỗi đã gặp khi
+# dùng class trần trong nút Train của web)
+from transformers import TrainerCallback  # noqa: E402
+
 app = Flask(__name__)
 
 # Trạng thái train toàn cục, web poll /api/train-status mỗi 3 giây
 TRAIN_STATE = {"running": False, "done": False, "message": "idle", "epoch": 0}
 
 
-class TrainProgressCallback:
+class TrainProgressCallback(TrainerCallback):
     """
     Callback Hugging Face Trainer cập nhật epoch vào TRAIN_STATE
     để web hiển thị tiến trình theo thời gian thực.
