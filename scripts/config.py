@@ -57,3 +57,34 @@ NUM_LABELS = 3
 NUM_EPOCHS = 3
 LEARNING_RATE = 2e-5
 BATCH_SIZE = 16
+
+# --- Hugging Face -------------------------------------------------------
+# Token đọc từ biến môi trường HF_TOKEN (KHÔNG ghi token vào code - GitHub
+# Push Protection sẽ chặn commit chứa secret). Đặt khi cần tải model gated:
+#   export HF_TOKEN=hf_xxx            (Linux/Mac/Colab shell)
+#   os.environ["HF_TOKEN"] = "hf_xxx" (trong notebook trước khi chạy pipeline)
+# Lưu ý: các model mặc định (phobert-base-v2, wonrax) đều public,
+# không cần token - login chỉ là tuỳ chọn.
+
+def hf_login_if_needed() -> None:
+    """
+    Đăng nhập Hugging Face nếu có biến môi trường HF_TOKEN.
+
+    Logic:
+      - Không có HF_TOKEN -> in ghi chú bỏ qua (model public không cần token)
+      - Có HF_TOKEN -> login; token lỗi (bị revoke/hết hạn) chỉ cảnh báo,
+        không dừng pipeline vì model public vẫn tải được
+    """
+    import os
+
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        print("[hf] Chua co bien env HF_TOKEN - bo qua (model public, khong can token)")
+        return
+    try:
+        from huggingface_hub import login
+
+        login(token=token)
+        print("[hf] Da dang nhap Hugging Face (HF_TOKEN)")
+    except Exception as exc:  # noqa: BLE001 - login lỗi không chặn pipeline
+        print(f"[hf][warn] HF login that bai - tiep tuc voi model public: {exc}")

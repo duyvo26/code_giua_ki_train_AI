@@ -51,17 +51,20 @@ Thực nghiệm xây dựng **hệ thống phân loại cảm xúc bình luận 
 
 ```text
 code_giua_ki_train_AI/
-├── sentiment_colab.ipynb   # Notebook duy nhất: clone repo & chạy toàn bộ trên Colab
+├── sentiment_colab.ipynb   # Notebook MỎNG: clone code (xoá clone cũ) + gọi lệnh python
 ├── README.md
 ├── map.md                  # Sơ đồ tổng thể dự án
-├── scripts/                # [THỰC NGHIỆM ML] chạy trên Colab
-│   ├── config.py           # Cấu hình: model, nhãn, đường dẫn
+├── scripts/                # [THỰC NGHIỆM ML] toàn bộ logic nằm ở đây, chạy bằng CLI
+│   ├── run_pipeline.py     # [ENTRY] 1 lệnh chạy toàn bộ: preprocess→baseline→đối chứng→fine-tune→đánh giá
+│   ├── demo_inference.py   # [DEMO] in "Sản phẩm rất tệ!" + 5 câu mẫu (nhãn + xác suất %)
+│   ├── config.py           # Cấu hình: model, nhãn, đường dẫn, HF_TOKEN + hf_login_if_needed()
 │   ├── preprocess.py       # Bước 1-3: tải dữ liệu + tiền xử lý + gán nhãn
 │   ├── baseline.py         # Thực nghiệm 1: TF-IDF + Logistic Regression
-│   ├── finetune.py         # Thực nghiệm 3: fine-tune PhoBERT-base
+│   ├── finetune.py         # Thực nghiệm 3: fine-tune PhoBERT-base-v2
 │   └── evaluate.py         # Bước 7: metrics, confusion matrix, PR curve, so sánh
-├── webapp/                  # [WEB DEMO] Flask + Tailwind - chạy trên Colab, expose qua Cloudflared
-│   ├── app.py               # Flask: /api/model-info, /api/train, /api/train-status, /api/predict
+├── webapp/                 # [WEB DEMO] Flask + Tailwind - chạy trên Colab, expose qua Cloudflared
+│   ├── run_web.py          # [ENTRY] Flask (thread nền) + tunnel Cloudflared, in link public
+│   ├── app.py              # Flask: /api/model-info, /api/train, /api/train-status, /api/predict
 │   ├── templates/index.html # UI Tailwind CDN (thông tin model / train / dự đoán)
 │   └── requirements.txt
 ├── data/                   # UIT-VSFC (tải tự động) + data/processed
@@ -73,18 +76,19 @@ code_giua_ki_train_AI/
 
 1. Mở `sentiment_colab.ipynb` bằng Colab: `https://github.com/duyvo26/code_giua_ki_train_AI`.
 2. Chọn **Runtime → Change runtime type → T4 GPU**.
-3. (Tùy chọn) Nếu dùng model gated: biểu tượng khoá bên trái → **+ New secret** → tên `HF_TOKEN`, giá trị là token tại https://huggingface.co/settings/tokens (không bắt buộc — 2 model mặc định đều public).
-4. Chạy lần lượt các cell **Runtime → Run all** (repo tự clone từ GitHub).
+3. Chạy lần lượt các cell **Runtime → Run all**. Notebook chỉ làm 3 việc: cài thư viện → **xoá clone cũ + clone bản mới** → chạy lệnh python:
 
 ```text
-Dữ liệu UIT-VSFC → Tiền xử lý → Baseline TF-IDF+LR → PhoBERT sẵn có
-→ Fine-tune PhoBERT-base-v2 (~15-20 phút) → Đánh giá & so sánh → Demo inference
-→ Web demo Flask + Cloudflared (link public) → Kết quả lưu vào results/ và models/
+!python scripts/run_pipeline.py    # toàn bộ thực nghiệm (fine-tune ~15-20 phút)
+!python scripts/demo_inference.py  # demo "Sản phẩm rất tệ!"
+!python webapp/run_web.py          # web demo Flask + link public Cloudflared
 ```
+
+Chạy lại nhanh (model đã có sẵn, không retrain): `python scripts/run_pipeline.py --skip-finetune`.
 
 ## 5. Web demo Flask (chạy trên Colab, public qua Cloudflared)
 
-Cuối notebook (Section 11) có cell chạy **Flask web** trong thread nền và mở **Cloudflared tunnel** — in ra link public `https://xxx.trycloudflare.com` mở trên trình duyệt bất kỳ (điện thoại, máy tính).
+Notebook cell cuối chạy `python webapp/run_web.py` — khởi động **Flask web** trong thread nền và mở **Cloudflared tunnel**, in ra link public `https://xxx.trycloudflare.com` mở trên trình duyệt bất kỳ (điện thoại, máy tính).
 
 **Giao diện (Tailwind, dark theme) gồm 3 chức năng:**
 
@@ -110,7 +114,7 @@ Dự đoán ví dụ:
 
 ```bash
 pip install -r webapp/requirements.txt
-python webapp/app.py
+python webapp/run_web.py --no-tunnel
 # mở http://localhost:8080
 ```
 
