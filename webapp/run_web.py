@@ -7,15 +7,19 @@ File liên quan: webapp/app.py, webapp/templates/index.html
 Cách dùng:
     python webapp/run_web.py              # Flask + Cloudflared tunnel (link public)
     python webapp/run_web.py --no-tunnel  # chỉ Flask localhost (triển khai nội bộ)
-    python webapp/run_web.py --port 9000  # đổi port
+    python webapp/run_web.py --port 9000  # đổi port (tự tìm port trống nếu bận)
 """
 
 import argparse
+import os
 import re
+import shutil
+import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -23,30 +27,83 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 TUNNEL_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+# Binary cloudflared chính thức cho Linux (Colab) - tải về khi pip không cài được
+CLOUDFLARED_URL = (
+    "https://github.com/cloudflare/cloudflared/releases/latest/"
+    "download/cloudflared-linux-amd64"
+)
+CLOUDFLARED_BIN = PROJECT_ROOT / "webapp" / "cloudflared"
 
 
-def _start_flask(port: int) -> None:
+def _find_free_port(start: int = 8080) -> int:
     """
-    Chạy Flask trong thread nền (daemon) để cell Colab không bị treo
-    và tiến trình tunnel có thể giữ ở foreground.
+    Tìm port trống bắt đầu từ start (tăng dần tối đa 20 port).
+
+    Logic:
+      - Thử bind socket vào từng port; thành công nghĩa là port trống
+      - Tránh lỗi "Address already in use" khi Flask cũ còn giữ port
+    """
+    for port in range(start, start + 20):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("0.0.0.0", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(f"Khong tim duoc port trong tu {start} den {start + 20}")
+
+
+def _start_flask(port: int) -> int:
+    """
+    Chạy Flask trong thread nền (daemon) để cell Colab không bị treo.
+
+    Trả về port thực tế đang chạy (có thể khác port truyền vào nếu bị bận).
     """
     from webapp.app import app as flask_app
 
+    actual_port = _find_free_port(port)
+    if actual_port != port:
+        print(f"[web][warn] Port {port} dang duoc dung - chuyen sang port {actual_port}")
+
     threading.Thread(
         target=flask_app.run,
-        kwargs={"host": "0.0.0.0", "port": port, "use_reloader": False},
+        kwargs={"host": "0.0.0.0", "port": actual_port, "use_reloader": False},
         daemon=True,
     ).start()
     # Chờ Flask sẵn sàng trước khi mở tunnel
     for _ in range(20):
         try:
-            import urllib.request
-
-            urllib.request.urlopen(f"http://localhost:{port}/health", timeout=2)
+            urllib.request.urlopen(
+                f"http://localhost:{actual_port}/health", timeout=2
+            )
             break
         except Exception:  # noqa: BLE001 - server chưa up, chờ tiếp
             time.sleep(0.5)
-    print(f"[web] Flask da san sang: http://localhost:{port}")
+    print(f"[web] Flask da san sang: http://localhost:{actual_port}")
+    return actual_port
+
+
+def _find_cloudflared() -> str:
+    """
+    Tìm binary cloudflared: ưu tiên PATH, nếu không có thì tải binary
+    chính thức từ GitHub về webapp/cloudflared.
+
+    Logic:
+      - pip package 'cloudflared' đôi khi không đưa binary vào PATH trên Colab
+      - Fallback tải file binary duy nhất (linux-amd64) rồi chmod +x
+    """
+    path = shutil.which("cloudflared")
+    if path:
+        return path
+
+    if CLOUDFLARED_BIN.exists():
+        return str(CLOUDFLARED_BIN)
+
+    print("[web] Khong thay cloudflared tren PATH - tai binary tu GitHub...")
+    urllib.request.urlretrieve(CLOUDFLARED_URL, CLOUDFLARED_BIN)
+    os.chmod(CLOUDFLARED_BIN, 0o755)
+    print(f"[web] Da tai: {CLOUDFLARED_BIN}")
+    return str(CLOUDFLARED_BIN)
 
 
 def _start_tunnel(port: int) -> str | None:
@@ -57,8 +114,9 @@ def _start_tunnel(port: int) -> str | None:
       - subprocess.Popen giữ tiến trình cloudflared sống
       - Duyệt từng dòng log, bắt URL dạng https://*.trycloudflare.com
     """
+    binary = _find_cloudflared()
     proc = subprocess.Popen(
-        ["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
+        [binary, "tunnel", "--url", f"http://localhost:{port}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -81,12 +139,12 @@ def main() -> None:
     parser.add_argument("--no-tunnel", action="store_true", help="Chi chay Flask localhost")
     args = parser.parse_args()
 
-    _start_flask(args.port)
+    actual_port = _start_flask(args.port)
 
     if args.no_tunnel:
-        print("Dang chay noi bo: http://localhost:{} (Ctrl+C de dung)".format(args.port))
+        print(f"Dang chay noi bo: http://localhost:{actual_port} (Ctrl+C de dung)")
     else:
-        public_url = _start_tunnel(args.port)
+        public_url = _start_tunnel(actual_port)
         print("=" * 60)
         print("LINK PUBLIC - mo trong trinh duyet:", public_url)
         print("=" * 60)
