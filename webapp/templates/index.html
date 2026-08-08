@@ -287,7 +287,7 @@
                         <button id="tg-start" class="px-3 py-1.5 rounded-md bg-accent hover:bg-emerald-400 text-slate-900 text-[11px] font-semibold transition-colors duration-200 cursor-pointer">Bật bot</button>
                         <button id="tg-stop" class="px-3 py-1.5 rounded-md bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-900 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Tắt</button>
                     </div>
-                    <p id="tg-note" class="text-[11px] text-slate-500 leading-relaxed">Long-polling - không cần webhook. Nhắn tin cho bot trên Telegram để test, bot sẽ trả nhãn + xác suất %. Trong group cần @mention và /setprivacy.</p>
+                    <p id="tg-note" class="text-[11px] text-slate-500 leading-relaxed">Long-polling - không cần webhook. Nhắn tin cho bot trên Telegram để test, bot sẽ trả nhãn + xác suất %. Trong group cần @mention và /setprivacy. Cấu hình tự lưu ở trình duyệt (localStorage) + server.</p>
                 </div>
             </section>
 
@@ -322,7 +322,7 @@
                         <button id="zl-start" class="px-3 py-1.5 rounded-md bg-accent hover:bg-emerald-400 text-slate-900 text-[11px] font-semibold transition-colors duration-200 cursor-pointer">Bật bot</button>
                         <button id="zl-stop" class="px-3 py-1.5 rounded-md bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-900 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Tắt</button>
                     </div>
-                    <p id="zl-note" class="text-[11px] text-slate-500 leading-relaxed">Bot Creator - long-polling, không cần webhook/HTTPS. Nhắn tin cho bot trên Zalo để test. Nếu tài khoản dùng base khác (vd bot-api.zapps.me) hãy sửa API base. Bấm Bật sẽ TỰ GỠ webhook đang cài (Zalo không cho polling song song webhook - vd webhook n8n).</p>
+                    <p id="zl-note" class="text-[11px] text-slate-500 leading-relaxed">Bot Creator - long-polling, không cần webhook/HTTPS. Nhắn tin cho bot trên Zalo để test. Nếu tài khoản dùng base khác (vd bot-api.zapps.me) hãy sửa API base. Bấm Bật sẽ TỰ GỠ webhook đang cài (Zalo không cho polling song song webhook - vd webhook n8n). Cấu hình tự lưu ở trình duyệt (localStorage) + server.</p>
                 </div>
             </section>
         </div>
@@ -1021,15 +1021,41 @@
         // ---------- Tab: Bots ----------
         const BOT_LOGS_SINCE = { telegram: 0, zalo: 0 };
         let botLogPoll = null;
+        // Config bot lưu THÊM ở trình duyệt (localStorage) - không mất khi
+        // Colab restart/reload trang; server vẫn nhận config để bot chạy
+        const LS_KEY = "sentiment_bot_config_v1";
+
+        function botLocalGet() {
+            try {
+                return JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+            } catch {
+                return {};
+            }
+        }
+
+        function botLocalSave() {
+            const local = botLocalGet();
+            local.telegram = {
+                token: document.getElementById("tg-token").value.trim() || local.telegram?.token || "",
+                chat_id: document.getElementById("tg-chatid").value.trim(),
+            };
+            local.zalo = {
+                token: document.getElementById("zl-token").value.trim() || local.zalo?.token || "",
+                api_base: document.getElementById("zl-base").value.trim(),
+                chat_id: document.getElementById("zl-chatid").value.trim(),
+            };
+            localStorage.setItem(LS_KEY, JSON.stringify(local));
+        }
 
         async function loadBotConfig() {
             try {
                 const cfg = await api("/api/bot/config");
-                document.getElementById("tg-token").placeholder = cfg.telegram.token || "123456:ABC-DEF... (chưa có token)";
-                document.getElementById("tg-chatid").value = cfg.telegram.chat_id || "";
-                document.getElementById("zl-token").placeholder = cfg.zalo.token || "id:secret (chưa có token)";
-                document.getElementById("zl-base").value = cfg.zalo.api_base;
-                document.getElementById("zl-chatid").value = cfg.zalo.chat_id || "";
+                const local = botLocalGet();
+                document.getElementById("tg-token").placeholder = (local.telegram?.token || cfg.telegram.token) ? "đã lưu (nhập mới để đổi)" : "123456:ABC-DEF... (chưa có token)";
+                document.getElementById("tg-chatid").value = cfg.telegram.chat_id || local.telegram?.chat_id || "";
+                document.getElementById("zl-token").placeholder = (local.zalo?.token || cfg.zalo.token) ? "đã lưu (nhập mới để đổi)" : "id:secret (chưa có token)";
+                document.getElementById("zl-base").value = cfg.zalo.api_base || local.zalo?.api_base || "https://bot-api.zaloplatforms.com";
+                document.getElementById("zl-chatid").value = cfg.zalo.chat_id || local.zalo?.chat_id || "";
                 await refreshBotStatus();
             } catch (err) {
                 console.error(err);
@@ -1072,12 +1098,13 @@
         async function saveBot(prefix) {
             const note = document.getElementById(prefix + "-note");
             try {
+                botLocalSave(); // lưu ngay vào trình duyệt (localStorage)
                 const res = await api("/api/bot/config", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(collectBotConfig(prefix)),
                 });
-                note.textContent = "Đã lưu cấu hình." + (res.notes || []).join(" ");
+                note.textContent = "Đã lưu cấu hình (trình duyệt + server)." + (res.notes || []).join(" ");
                 document.getElementById(prefix + "-token").value = "";
                 await loadBotConfig();
             } catch (err) {
@@ -1169,6 +1196,9 @@
             BOT_LOGS_SINCE.telegram = 0;
             BOT_LOGS_SINCE.zalo = 0;
         });
+        // Tự lưu config vào localStorage khi gõ (không mất khi reload/restart Colab)
+        ["tg-token", "tg-chatid", "zl-token", "zl-base", "zl-chatid"].forEach(id =>
+            document.getElementById(id).addEventListener("input", botLocalSave));
 
         loadModelInfo();
         loadTrainConfig();
