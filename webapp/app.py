@@ -1,15 +1,22 @@
 """
 File: app.py
-Chức năng: Flask web demo - xem thông tin model, train lại, dự đoán cảm xúc
+Chức năng: Flask web demo - thông tin model, train (có log realtime), dự đoán,
+           phân tích dữ liệu UIT-VSFC (data gốc, tiền xử lý, mapping nhãn)
 Vai trò: Web app - chạy trong Colab, expose qua Cloudflared tunnel; gọi trực tiếp scripts/
-File liên quan: webapp/templates/index.html, scripts/finetune.py, scripts/preprocess.py
+File liên quan: webapp/templates/index.html, scripts/finetune.py, scripts/preprocess.py, scripts/config.py
 """
 
+import contextlib
+import io
+import itertools
 import json
 import sys
 import threading
+import time
+from collections import deque
 from pathlib import Path
 
+import pandas as pd
 from flask import Flask, jsonify, render_template, request
 
 # Thư mục gốc repo (webapp/ nằm ngay trong repo nên lấy cha của webapp/)
@@ -18,12 +25,21 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.config import (  # noqa: E402
+    BATCH_SIZE,
     BEST_MODEL_DIR,
+    DATA_DIR,
     LABEL_NAMES_EN,
     LABEL_NAMES_VI,
+    LABEL_TO_ID,
+    LEARNING_RATE,
+    MAX_LEN,
+    NUM_EPOCHS,
+    PROCESSED_DIR,
     RESULTS_DIR,
+    SEED,
+    TRANSFORMER_MODEL,
 )
-from scripts.preprocess import prepare_dataset  # noqa: E402
+from scripts.preprocess import clean_dataframe, normalize_text, prepare_dataset  # noqa: E402
 
 # Trainer v5 yêu cầu callback kế thừa TrainerCallback, nếu không sẽ
 # AttributeError on_init_end khi Trainer gọi các hook (lỗi đã gặp khi
@@ -35,6 +51,23 @@ app = Flask(__name__)
 # Trạng thái train toàn cục, web poll /api/train-status mỗi 3 giây
 TRAIN_STATE = {"running": False, "done": False, "message": "idle", "epoch": 0}
 
+# Log huấn luyện realtime: deque giữ tối đa 500 dòng, id tăng dần để
+# frontend poll /api/train-log?since=<id cuối> chỉ nhận dòng mới
+TRAIN_LOG: deque = deque(maxlen=500)
+LOG_SEQ = itertools.count(1)
+
+
+def _append_log(message: str, level: str = "INFO") -> None:
+    """Thêm 1 dòng vào TRAIN_LOG kèm timestamp và mức độ (INFO/EPOCH/ERROR)."""
+    TRAIN_LOG.append(
+        {
+            "id": next(LOG_SEQ),
+            "ts": time.strftime("%H:%M:%S"),
+            "level": level,
+            "msg": message,
+        }
+    )
+
 
 class TrainProgressCallback(TrainerCallback):
     """
@@ -44,6 +77,37 @@ class TrainProgressCallback(TrainerCallback):
 
     def on_epoch_end(self, args, state, control, **kwargs):
         TRAIN_STATE["epoch"] = state.epoch
+
+
+class LogCaptureCallback(TrainerCallback):
+    """
+    Callback bắt log của Trainer: mỗi bước log (loss, lr, eval) được
+    format thành dòng đưa vào TRAIN_LOG để web hiển thị realtime.
+    """
+
+    def on_log(self, args, state, control, logs, **kwargs):
+        entry = logs
+        if not entry:
+            return
+        epoch = entry.get("epoch")
+        parts = [f"epoch {epoch:.2f}"]
+        for key in ("loss", "learning_rate", "eval_accuracy", "eval_f1_macro"):
+            if key in entry and entry[key] is not None:
+                parts.append(f"{key}={entry[key]:.4f}" if isinstance(entry[key], float) else f"{key}={entry[key]}")
+        _append_log(" ".join(parts), "EPOCH")
+
+
+class _LogWriter(io.StringIO):
+    """
+    Bắt print() từ fine_tune()/prepare_dataset() (vd "[finetune] ...",
+    "[tokenize] ...") đẩy vào TRAIN_LOG thay vì stdout console.
+    """
+
+    def write(self, text: str) -> int:
+        line = text.strip()
+        if line:
+            _append_log(line, "INFO")
+        return len(text)
 
 
 def _read_json(path: Path) -> dict | None:
@@ -95,6 +159,119 @@ def model_info():
     return jsonify(info)
 
 
+@app.get("/api/train-config")
+def train_config():
+    """
+    Tham số huấn luyện + kích thước bộ dữ liệu.
+    Trả về cấu hình từ scripts/config.py (nguồn duy nhất, không hardcode
+    lại trong web) và số dòng thực tế từ data/processed/*.csv.
+    """
+    sizes = {}
+    for split in ("train", "valid", "test"):
+        path = PROCESSED_DIR / f"{split}.csv"
+        if path.exists():
+            sizes[split] = len(pd.read_csv(path))
+        else:
+            sizes[split] = None
+
+    return jsonify(
+        {
+            "model": TRANSFORMER_MODEL,
+            "num_labels": 3,
+            "epochs": NUM_EPOCHS,
+            "learning_rate": LEARNING_RATE,
+            "batch_size": BATCH_SIZE,
+            "max_len": MAX_LEN,
+            "warmup_ratio": 0.1,
+            "weight_decay": 0.01,
+            "optimizer": "AdamW (Hugging Face default)",
+            "fp16": True,
+            "seed": SEED,
+            "dataset_sizes": sizes,
+        }
+    )
+
+
+@app.get("/api/data-info")
+def data_info():
+    """
+    Phân tích dữ liệu UIT-VSFC: data gốc, tiền xử lý, label mapping.
+
+    Logic:
+      - Đọc 3 CSV raw (data/uit_vsfc_*.csv) + processed (data/processed/*.csv)
+      - Chạy LẠI đúng clean_dataframe()/normalize_text() của pipeline để số
+        liệu web khớp 100% với báo cáo (không duplicate logic riêng)
+      - Trả: thống kê làm sạch từng split, phân bố nhãn, mapping 3 lớp,
+        ví dụ before/after chuẩn hoá từ dữ liệu thật
+    """
+    raw_files = {s: DATA_DIR / f"uit_vsfc_{s}.csv" for s in ("train", "valid", "test")}
+    if not all(p.exists() for p in raw_files.values()):
+        return jsonify(
+            {
+                "exists": False,
+                "note": "Chưa có dữ liệu UIT-VSFC - hãy chạy pipeline (hoặc nút Train) trước.",
+            }
+        )
+
+    raw = {s: pd.read_csv(p) for s, p in raw_files.items()}
+
+    stats = {}
+    for s, df in raw.items():
+        _, st = clean_dataframe(df)
+        stats[s] = st
+
+    # Ví dụ before/after: 4 dòng đầu của train (raw -> sau normalize_text)
+    samples = []
+    for _, row in raw["train"].head(4).iterrows():
+        samples.append({"raw": str(row["text"]), "clean": normalize_text(str(row["text"]))})
+
+    # Mapping nhãn: negative -> 0 -> Tiêu cực ...
+    mapping = [
+        {
+            "label": label,
+            "id": label_id,
+            "en": LABEL_NAMES_EN[label_id],
+            "vi": LABEL_NAMES_VI[label_id],
+        }
+        for label, label_id in LABEL_TO_ID.items()
+    ]
+
+    # Phân bố nhãn theo split (count + %)
+    distribution = {}
+    for s in ("train", "valid", "test"):
+        dist = stats[s]["phan_bo_lop"]
+        total = stats[s]["so_dong_con_lai"] or 1
+        distribution[s] = [
+            {
+                "id": label_id,
+                "vi": LABEL_NAMES_VI[label_id],
+                "en": LABEL_NAMES_EN[label_id],
+                "count": dist.get(label_id, 0),
+                "pct": round(dist.get(label_id, 0) / total * 100, 2),
+            }
+            for label_id in (0, 1, 2)
+        ]
+
+    return jsonify(
+        {
+            "exists": True,
+            "columns": list(raw["train"].columns),
+            "stats": stats,
+            "samples": samples,
+            "mapping": mapping,
+            "distribution": distribution,
+            "preprocess_steps": [
+                "Sửa lỗi encoding (latin-1 -> utf-8)",
+                "Gộp nhiều khoảng trắng/tab/xuống dòng thành 1",
+                "Bỏ khoảng trắng thừa quanh dấu câu",
+                "Chuẩn hoá lowercase (không xoá dấu tiếng Việt)",
+                "Loại bỏ dòng rỗng, duplicate, nhãn không hợp lệ",
+                "KHÔNG xoá stopword - Transformer cần ngữ cảnh toàn câu",
+            ],
+        }
+    )
+
+
 @app.post("/api/predict")
 def predict():
     """
@@ -133,22 +310,31 @@ def train():
     Logic:
       - Nếu đang train -> từ chối (409)
       - Thread nền gọi prepare_dataset() (cache CSV nhanh) + fine_tune()
-      - TRAIN_STATE cập nhật running/done/epoch để frontend poll
+      - TRAIN_STATE + TRAIN_LOG cập nhật realtime để frontend poll
     """
     if TRAIN_STATE["running"]:
         return jsonify({"error": "Mô hình đang được huấn luyện, vui lòng chờ"}), 409
 
     def _run_train():
         TRAIN_STATE.update(running=True, done=False, message="preparing", epoch=0)
+        _append_log("=== BAT DAU HUAN LUYEN ===", "EPOCH")
         try:
-            splits, _ = prepare_dataset()
             from scripts.finetune import fine_tune
 
-            # Callback cập nhật epoch vào TRAIN_STATE để web hiển thị tiến trình
-            fine_tune(splits, callbacks=[TrainProgressCallback()])
+            # Bắt print() của pipeline -> TRAIN_LOG (web hiển thị realtime)
+            writer = _LogWriter()
+            with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
+                splits, _ = prepare_dataset()
+                _append_log("[phase] Tien xu ly du lieu xong - tokenize & fine-tune...", "EPOCH")
+                fine_tune(
+                    splits,
+                    callbacks=[TrainProgressCallback(), LogCaptureCallback()],
+                )
             TRAIN_STATE.update(running=False, done=True, message="done")
+            _append_log("=== HOAN TAT - model da luu tai models/best_model ===", "EPOCH")
         except Exception as exc:  # noqa: BLE001 - lỗi nền cần báo về web
             TRAIN_STATE.update(running=False, done=False, message=f"error: {exc}")
+            _append_log(f"LOI: {exc}", "ERROR")
 
     threading.Thread(target=_run_train, daemon=True).start()
     return jsonify({"started": True, "note": "Training chạy nền, thời gian ~15-20 phút"})
@@ -158,6 +344,26 @@ def train():
 def train_status():
     """Trạng thái huấn luyện - frontend poll mỗi 3 giây."""
     return jsonify(TRAIN_STATE)
+
+
+@app.get("/api/train-log")
+def train_log():
+    """
+    Log huấn luyện tăng dần: trả các dòng có id > since.
+
+    Logic:
+      - since = id dòng cuối mà frontend đã nhận -> chỉ gửi dòng mới,
+        tránh gửi lại toàn bộ 500 dòng mỗi lần poll (2s)
+    """
+    since = request.args.get("since", 0, type=int)
+    lines = [line for line in TRAIN_LOG if line["id"] > since]
+    return jsonify(
+        {
+            "lines": lines,
+            "epoch": TRAIN_STATE["epoch"],
+            "running": TRAIN_STATE["running"],
+        }
+    )
 
 
 if __name__ == "__main__":

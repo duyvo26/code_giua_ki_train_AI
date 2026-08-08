@@ -151,13 +151,16 @@ python webapp/run_web.py --no-tunnel             # web nội bộ tại http://l
 
 ## 7. Web demo (Flask + Tailwind + Cloudflared)
 
-**Giao diện (dark theme) gồm 3 chức năng:**
+**Giao diện (dark theme OLED, font Inter) gồm 6 khu vực:**
 
-| Chức năng | Mô tả | API phía sau |
+| Khu vực | Mô tả | API phía sau |
 |---|---|---|
-| **Thông tin model** | Bảng thông số: model gốc, số nhãn, Accuracy, F1-macro, **Recall lớp Negative**, thời gian train | `GET /api/model-info` (đọc `models/best_model/config.json` + `results/metrics_phobert_finetuned.json`) |
-| **Train lại** | Fine-tune chạy thread nền, hiển thị epoch + trạng thái, không treo web | `POST /api/train` + `GET /api/train-status` (poll 3s) |
-| **Dự đoán cảm xúc** | Nhập bình luận → nhãn + xác suất % 3 lớp dạng thanh màu | `POST /api/predict` |
+| **4 KPI cards** | Accuracy · F1-macro · **Recall lớp Negative** · Thời gian train | `GET /api/model-info` |
+| **Huấn luyện** | Bảng **tham số train** (model, epochs, lr, batch, warmup, optimizer, FP16, seed, kích thước dataset) + nút Train + thanh epoch + phase chips | `GET /api/train-config` + `POST /api/train` + `GET /api/train-status` |
+| **Thông tin model** | Model gốc, số nhãn, Accuracy, F1, Precision/Recall macro, Recall Negative, đường dẫn | `GET /api/model-info` |
+| **Phân tích dữ liệu** | ① Dữ liệu gốc (thống kê 3 split + mẫu thô) ② Tiền xử lý (bảng làm sạch + 5 bước chuẩn hoá + Before/After thật) ③ Label mapping + phân bố nhãn theo split (thanh %) | `GET /api/data-info` |
+| **Log huấn luyện** | Terminal realtime: bắt print + log Trainer (loss, lr, epoch, eval acc/F1), màu theo level, auto-scroll, nút Sao chép/Xoá | `GET /api/train-log?since=N` (poll 2s) |
+| **Dự đoán cảm xúc** | Textarea + 4 chip ví dụ + badge nhãn + 3 thanh xác suất % | `POST /api/predict` |
 
 **Bảo mật dữ liệu:** tokenizer + model + inference chạy 100% cục bộ — bình luận khách hàng không gửi ra ngoài (Cloudflared chỉ là đường ống truyền web).
 
