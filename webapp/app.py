@@ -460,8 +460,19 @@ def train():
 
 @app.get("/api/train-status")
 def train_status():
-    """Trạng thái huấn luyện - frontend poll mỗi 3 giây."""
-    return jsonify(TRAIN_STATE)
+    """
+    Trạng thái huấn luyện - frontend poll mỗi 3 giây.
+
+    Logic:
+      - total_epochs lấy từ params đã chọn khi bấm Train (không hardcode 3)
+        để progress bar + dòng "epoch x / N" hiển thị đúng số epochs người dùng nhập
+    """
+    return jsonify(
+        {
+            **TRAIN_STATE,
+            "total_epochs": TRAIN_STATE.get("params", {}).get("epochs", 3),
+        }
+    )
 
 
 @app.get("/api/train-log")

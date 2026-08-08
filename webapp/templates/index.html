@@ -515,10 +515,12 @@
             const msg = document.getElementById("train-message");
             const progress = document.getElementById("train-progress");
             const btn = document.getElementById("btn-train");
+            // Tổng epochs người dùng đã chọn (không hardcode 3)
+            const total = status.total_epochs || 3;
             if (status.running) {
-                const pct = status.epoch ? Math.min(100, Math.round((status.epoch / 3) * 100)) : 8;
+                const pct = status.epoch ? Math.min(100, Math.round((status.epoch / total) * 100)) : 8;
                 progress.style.width = pct + "%";
-                msg.textContent = "Fine-tune epoch " + (status.epoch || 1) + " / 3";
+                msg.textContent = "Fine-tune epoch " + (status.epoch || 1) + " / " + total;
                 setPhase(status.epoch >= 1 ? 2 : 1);
             } else {
                 document.getElementById("train-spinner").classList.add("hidden");
@@ -528,7 +530,8 @@
                     msg.className = "text-emerald-400 font-medium";
                     setPhase(3);
                     await loadModelInfo();
-                    await loadDataInfo();   // dữ liệu giờ đã có -> hiển thị phân tích
+                    await loadDataInfo();      // dữ liệu giờ đã có -> hiển thị phân tích
+                    await loadTrainConfig();   // cập nhật kích thước dataset (trước đó "chưa có")
                 } else {
                     msg.textContent = "Có lỗi: " + status.message;
                     msg.className = "text-red-400 font-medium";
