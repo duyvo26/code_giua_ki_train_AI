@@ -93,10 +93,15 @@ def fine_tune(
     batch_size: int = BATCH_SIZE,
     seed: int = SEED,
     max_len: int = MAX_LEN,
+    callbacks: list | None = None,
 ) -> Trainer:
     """
     Fine-tune PhoBERT trên train, tối ưu theo F1-macro trên valid,
     trả về Trainer đã huấn luyện xong.
+
+    Args:
+        callbacks (list | None): danh sách TrainerCallback bổ sung
+            (ví dụ: callback cập nhật tiến trình epoch cho web Flask)
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -145,6 +150,7 @@ def fine_tune(
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics_fn,
+        callbacks=callbacks,
     )
 
     print("[finetune] Bắt đầu huấn luyện trên GPU..." if use_fp16

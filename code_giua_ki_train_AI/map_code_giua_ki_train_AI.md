@@ -5,31 +5,27 @@ Bản đồ chi tiết thư mục `code_giua_ki_train_AI/`. Xem `map.md` ở th�
 ## Mục lục
 
 1. [Kiến trúc tổng thể](#1-kien-truc-tong-the)
-2. [Backend (app/)](#2-backend-app)
+2. [Web Demo (webapp/)](#2-web-demo-webapp)
 3. [Thực nghiệm ML (scripts/)](#3-thuc-nghiem-ml-scripts)
 4. [Quy ước code](#4-quy-uoc-code)
 
 ## 1. Kiến trúc tổng thể
 
 ```text
-Thực nghiệm (Colab)                      Triển khai (Server nội bộ DNC)
-UIT-VSFC -> Fine-tune PhoBERT   ->       FastAPI /predict -> Dashboard
-                |                                |
-                v                                v
-          models/best_model  ------------->  SentimentService (inference cục bộ)
+Thực nghiệm (Colab)                              Web demo (Colab + tunnel)
+UIT-VSFC -> Fine-tune PhoBERT   ->              Flask /api/predict -> UI Tailwind
+                |                                        |
+                v                                        v
+          models/best_model  ----------------->  scripts.finetune (inference cục bộ)
 ```
 
-## 2. Backend (app/)
+## 2. Web Demo (webapp/)
 
 | File | Vai trò | File liên quan |
 |---|---|---|
-| `main.py` | Entry point: tạo app, CORS, handler, include router | routers/, utils/response.py, services/ |
-| `config.py` | Pydantic Settings, DIR_ROOT từ .env | .env, main.py, logger.py, services/ |
-| `logger.py` | get_logger() console + file rotating | utils/logs/app.log |
-| `utils/response.py` | ApiSuccess, ApiError, exception handlers | routers/, main.py |
-| `schemas/sentiment_schema.py` | PredictRequest, PredictResponse, HealthResponse | routers/ |
-| `services/sentiment_service.py` | SentimentService: load model, predict | routers/, config.py |
-| `routers/sentiment_router.py` | POST /predict, GET /health (chỉ dispatch) | schemas/, services/ |
+| `app.py` | Flask app: /, /api/model-info, /api/train, /api/train-status, /api/predict | templates/, scripts/finetune.py, scripts/preprocess.py |
+| `templates/index.html` | UI Tailwind CDN: 3 card, JS fetch API | app.py |
+| `requirements.txt` | Deps: flask, cloudflared, transformers, torch, sklearn, pandas | - |
 
 ## 3. Thực nghiệm ML (scripts/)
 
@@ -45,6 +41,5 @@ UIT-VSFC -> Fine-tune PhoBERT   ->       FastAPI /predict -> Dashboard
 
 - File Header (File/Chức năng/Vai trò/File liên quan) ở mọi file.
 - Docstring Google Style kèm giải thích logic cho mọi hàm.
-- Router không logic, service chứa logic AI, response chuẩn ApiSuccess/ApiError.
-- Logging qua `get_logger(__name__)`, cấm print trong app/.
+- Flask gọi thẳng `scripts/` in-process; train chạy thread nền + poll status.
 - Không emoji trong code/markdown.

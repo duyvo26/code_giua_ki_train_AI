@@ -60,74 +60,63 @@ code_giua_ki_train_AI/
 │   ├── baseline.py         # Thực nghiệm 1: TF-IDF + Logistic Regression
 │   ├── finetune.py         # Thực nghiệm 3: fine-tune PhoBERT-base
 │   └── evaluate.py         # Bước 7: metrics, confusion matrix, PR curve, so sánh
-├── app/                    # [BACKEND] FastAPI - triển khai nội bộ (bảo mật dữ liệu)
-│   ├── main.py             # Entry point: CORS, exception handler, nạp model
-│   ├── config.py           # Pydantic Settings (nạp từ .env)
-│   ├── logger.py           # Logging có cấu trúc (cấm print)
-│   ├── routers/            # sentiment_router.py: POST /predict, GET /health
-│   ├── services/           # sentiment_service.py: inference cục bộ
-│   ├── schemas/            # Pydantic request/response
-│   ├── utils/              # response.py: ApiSuccess/ApiError
+├── webapp/                  # [WEB DEMO] Flask + Tailwind - chạy trên Colab, expose qua Cloudflared
+│   ├── app.py               # Flask: /api/model-info, /api/train, /api/train-status, /api/predict
+│   ├── templates/index.html # UI Tailwind CDN (thông tin model / train / dự đoán)
 │   └── requirements.txt
 ├── data/                   # UIT-VSFC (tải tự động) + data/processed
 ├── models/                 # best_model/ sau fine-tune
-├── results/                # metrics JSON, figures, compare_table.md
-└── utils/logs/             # File log backend
+└── results/                # metrics JSON, figures, compare_table.md
 ```
 
 ## 4. Chạy trên Google Colab
 
-1. Push repo này lên GitHub (hoặc tải vào Google Drive).
-2. Mở `sentiment_colab.ipynb` bằng Colab: `File → Open notebook → GitHub/Drive`.
-3. Chọn **Runtime → Change runtime type → T4 GPU**.
-4. Sửa `REPO_URL` ở **Section 2** bằng địa chỉ GitHub của nhóm.
-5. Chạy lần lượt các cell **Runtime → Run all**.
+1. Mở `sentiment_colab.ipynb` bằng Colab: `https://github.com/duyvo26/code_giua_ki_train_AI`.
+2. Chọn **Runtime → Change runtime type → T4 GPU**.
+3. Chạy lần lượt các cell **Runtime → Run all** (repo tự clone từ GitHub).
 
 ```text
 Dữ liệu UIT-VSFC → Tiền xử lý → Baseline TF-IDF+LR → PhoBERT sẵn có
 → Fine-tune PhoBERT (~15-20 phút) → Đánh giá & so sánh → Demo inference
-→ Kết quả lưu vào results/ và models/
+→ Web demo Flask + Cloudflared (link public) → Kết quả lưu vào results/ và models/
 ```
 
-## 5. Triển khai nội bộ bằng FastAPI (bảo mật dữ liệu)
+## 5. Web demo Flask (chạy trên Colab, public qua Cloudflared)
 
-Sau khi fine-tune xong trên Colab, tải `models/best_model/` về server nội bộ:
+Cuối notebook (Section 11) có cell chạy **Flask web** trong thread nền và mở **Cloudflared tunnel** — in ra link public `https://xxx.trycloudflare.com` mở trên trình duyệt bất kỳ (điện thoại, máy tính).
 
-```bash
-cp .env.example .env
-pip install -r app/requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+**Giao diện (Tailwind, dark theme) gồm 3 chức năng:**
 
-Kiểm tra:
+| Chức năng | Mô tả |
+|---|---|
+| **Thông tin model** | Bảng thông số PhoBERT fine-tuned: model gốc, số nhãn, Accuracy, F1-macro, **Recall lớp Negative**, thời gian train |
+| **Train lại** | Fine-tune chạy thread nền, hiển thị tiến trình epoch + trạng thái, trang web không bị treo |
+| **Dự đoán cảm xúc** | Nhập bình luận → nhãn + xác suất % 3 lớp (Negative/Neutral/Positive) dạng thanh màu |
 
-```bash
-curl -X POST http://localhost:8000/predict \
-     -H "Content-Type: application/json" \
-     -d '{"text": "Sản phẩm rất tệ!"}'
-```
+Dự đoán ví dụ:
 
 ```json
 {
-  "success": true,
-  "message": "Thanh cong",
-  "data": {
-    "text": "Sản phẩm rất tệ!",
-    "sentiment": "Negative",
-    "sentiment_vi": "Tiêu cực",
-    "confidence": 0.987,
-    "probabilities": {"Negative": 0.987, "Neutral": 0.008, "Positive": 0.005}
-  }
+  "text": "Sản phẩm rất tệ!",
+  "sentiment": "Negative",
+  "sentiment_vi": "Tiêu cực",
+  "confidence": 0.987,
+  "probabilities_vi": {"Tiêu cực": 0.987, "Trung tính": 0.008, "Tích cực": 0.005}
 }
 ```
 
-Mọi endpoint trả JSON chuẩn `ApiSuccess` / `ApiError` (trường `success` để frontend phân biệt ngay không cần đọc HTTP status).
+**Chạy nội bộ (không cần tunnel, sau khi có `models/best_model/`):**
 
-**Điểm bảo mật:** tokenizer + mô hình + inference chạy 100% cục bộ — bình luận khách hàng không bao giờ được gửi ra API bên ngoài.
+```bash
+pip install -r webapp/requirements.txt
+python webapp/app.py
+# mở http://localhost:8080
+```
+
+**Điểm bảo mật:** tokenizer + mô hình + inference chạy 100% cục bộ — bình luận khách hàng không bao giờ được gửi ra API bên ngoài (Cloudflared chỉ là đường ống truyền web, model vẫn nằm trên máy chạy).
 
 ```text
-Khách hàng → Website/App → API nội bộ (FastAPI) → Transformer cục bộ
-            → Negative/Positive → Dashboard doanh nghiệp
+Khách hàng → Website/App → Flask (Transformer cục bộ) → Negative/Positive → Dashboard doanh nghiệp
 ```
 
 ## 6. Bảng kết quả (điền sau khi chạy thực tế)

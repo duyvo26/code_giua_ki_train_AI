@@ -6,26 +6,21 @@
 
 ```text
 code_giua_ki_train_AI/
-├── sentiment_colab.ipynb   # Notebook chạy toàn bộ thực nghiệm trên Colab
-├── app/                    # [BACKEND] FastAPI - triển khai nội bộ (bảo mật dữ liệu)
+├── sentiment_colab.ipynb   # Notebook chạy toàn bộ thực nghiệm + web demo trên Colab
+├── webapp/                 # [WEB DEMO] Flask + Tailwind, expose qua Cloudflared
 ├── scripts/                # [THỰC NGHIỆM ML] Huấn luyện & đánh giá trên Colab
 ├── data/                   # UIT-VSFC + data/processed
 ├── models/                 # best_model/ sau fine-tune
-├── results/                # metrics JSON, figures, compare_table.md
-└── utils/logs/             # File log backend
+└── results/                # metrics JSON, figures, compare_table.md
 ```
 
-## Thành phần Backend (app/)
+## Thành phần Web Demo (webapp/)
 
 | File | Vai trò | Chức năng |
 |---|---|---|
-| `app/main.py` | Entry point | Tạo app, CORS, exception handlers, nạp model khi startup |
-| `app/config.py` | Config | Pydantic Settings nạp từ `.env`, DIR_ROOT, MODEL_PATH |
-| `app/logger.py` | Util | `get_logger()` logging có cấu trúc, RotatingFileHandler |
-| `app/utils/response.py` | Util | `ApiSuccess`/`ApiError` + global exception handler |
-| `app/schemas/sentiment_schema.py` | Schema | PredictRequest, PredictResponse, HealthResponse |
-| `app/services/sentiment_service.py` | Service | `SentimentService` — tải model + inference cục bộ |
-| `app/routers/sentiment_router.py` | Router | `POST /predict`, `GET /health` — chỉ validate + dispatch |
+| `webapp/app.py` | Web app | Flask: `/` (UI), `/api/model-info`, `/api/train`, `/api/train-status`, `/api/predict` |
+| `webapp/templates/index.html` | UI | Tailwind CDN: 3 card (thông tin model / train / dự đoán) |
+| `webapp/requirements.txt` | Deps | flask, cloudflared, transformers, torch, scikit-learn, pandas |
 
 ## Thành phần Thực nghiệm ML (scripts/)
 
@@ -42,13 +37,13 @@ code_giua_ki_train_AI/
 ```text
 [Colab] UIT-VSFC -> preprocess -> baseline -> finetune PhoBERT -> models/best_model
                                                                     |
-[Backend] POST /predict -> router (validate) -> SentimentService (inference cục bộ)
-          -> ApiSuccess { sentiment, probabilities } -> Dashboard nội bộ
+[Web] Flask (/api/predict) -> load_sentiment_model -> inference cục bộ
+       -> { sentiment, probabilities } -> UI Tailwind / Dashboard nội bộ
+[Web] /api/train -> thread nền fine_tune(splits) -> cập nhật models/best_model
 ```
 
 ## Quy tắc
 
-- Router không chứa business logic — chỉ gọi service (execution-rules Rule 1).
-- Mọi endpoint trả `ApiSuccess`/`ApiError` (api-response-standard).
-- Cấm `print()` trong `app/` — dùng `get_logger(__name__)` (logging-monitoring).
-- Bí mật (API key, MODEL_PATH) trong `.env`, chỉ commit `.env.example`.
+- Web gọi thẳng `scripts/` (in-process) — không có API trung gian trên Colab.
+- `/api/train` chạy thread nền, `/api/train-status` để frontend poll — không treo web.
+- Model + inference chạy 100% cục bộ — dữ liệu bình luận không gửi ra ngoài (Cloudflared chỉ là đường ống web).

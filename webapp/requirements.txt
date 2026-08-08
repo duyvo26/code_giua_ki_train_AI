@@ -1,0 +1,12 @@
+"""
+File: requirements.txt
+Chức năng: Danh sách thư viện cho web Flask chạy trên Colab
+"""
+
+flask>=3.0
+requests>=2.31
+cloudflared>=3.0
+transformers>=4.41
+torch>=2.1
+scikit-learn>=1.3
+pandas>=2.0

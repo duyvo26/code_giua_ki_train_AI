@@ -8,7 +8,6 @@ data/*.csv
 data/processed/
 models/best_model/
 results/
-utils/logs/
 
 # Môi trường
 .venv/

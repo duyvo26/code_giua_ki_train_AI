@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentiment Analysis - PhoBERT Fine-tuned</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-10">
+        <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div>
+                <h1 class="text-lg font-bold">Sentiment Analysis - PhoBERT</h1>
+                <p class="text-xs text-slate-400">Phân loại cảm xúc bình luận tiếng Việt | UIT-VSFC 3 lớp</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="model-badge" class="px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-400">Đang kiểm tra model...</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-8 grid md:grid-cols-3 gap-6">
+
+        <!-- Card 1: Thông tin model -->
+        <section class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <h2 class="font-semibold mb-4 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-sky-400"></span> Thông tin model
+            </h2>
+            <div id="model-info" class="text-sm space-y-3">
+                <p class="text-slate-500">Đang tải...</p>
+            </div>
+            <button id="btn-refresh-info"
+                    class="mt-4 w-full py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-medium transition">
+                Làm mới
+            </button>
+        </section>
+
+        <!-- Card 2: Train -->
+        <section class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <h2 class="font-semibold mb-4 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-amber-400"></span> Huấn luyện
+            </h2>
+            <p class="text-xs text-slate-400 leading-relaxed mb-4">
+                Fine-tune PhoBERT-base trên toàn bộ dữ liệu UIT-VSFC.
+                Quá trình chạy nền trên GPU Colab, mất khoảng 15-20 phút.
+                Khi huấn luyện, trang vẫn dùng được bình thường.
+            </p>
+            <div id="train-status" class="mb-4 text-sm hidden">
+                <div class="flex items-center gap-2 text-amber-400">
+                    <span id="train-spinner"
+                          class="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin"></span>
+                    <span id="train-message">Đang huấn luyện...</span>
+                </div>
+                <div class="mt-3 h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div id="train-progress" class="h-full bg-amber-400 transition-all" style="width: 0%"></div>
+                </div>
+                <p id="train-epoch" class="mt-2 text-xs text-slate-500"></p>
+            </div>
+            <button id="btn-train"
+                    class="w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-900 font-semibold text-sm transition">
+                Train lại mô hình
+            </button>
+            <p id="train-note" class="mt-2 text-xs text-slate-500 hidden"></p>
+        </section>
+
+        <!-- Card 3: Dự đoán -->
+        <section class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <h2 class="font-semibold mb-4 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Dự đoán cảm xúc
+            </h2>
+            <textarea id="input-text" rows="4"
+                      class="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                      placeholder='Nhập bình luận, ví dụ: "Sản phẩm rất tệ!"'></textarea>
+            <button id="btn-predict"
+                    class="mt-3 w-full py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-semibold text-sm transition">
+                Phân tích
+            </button>
+            <div id="predict-result" class="mt-4 hidden">
+                <div id="predict-badge" class="text-center py-2 rounded-lg font-semibold mb-3"></div>
+                <div id="predict-bars" class="space-y-2"></div>
+            </div>
+            <p id="predict-error" class="mt-3 text-xs text-red-400 hidden"></p>
+        </section>
+
+    </main>
+
+    <footer class="max-w-6xl mx-auto px-4 pb-8 text-center text-xs text-slate-600">
+        Máy học nâng cao - 25MIT-1A | PhoBERT-base fine-tuned trên UIT-VSFC
+    </footer>
+
+    <script>
+        const LABELS = [
+            { key: "Negative", vi: "Tiêu cực", color: "bg-red-500" },
+            { key: "Neutral",  vi: "Trung tính", color: "bg-amber-400" },
+            { key: "Positive", vi: "Tích cực", color: "bg-emerald-500" },
+        ];
+
+        async function api(url, options = {}) {
+            const res = await fetch(url, options);
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.error || "Lỗi server");
+            }
+            return res.json();
+        }
+
+        // ---------- Card 1: Thông tin model ----------
+        async function loadModelInfo() {
+            const box = document.getElementById("model-info");
+            const badge = document.getElementById("model-badge");
+            box.innerHTML = '<p class="text-slate-500">Đang tải...</p>';
+            try {
+                const info = await api("/api/model-info");
+                if (!info.exists) {
+                    badge.className = "px-3 py-1 rounded-full text-xs font-medium bg-red-900/60 text-red-300";
+                    badge.textContent = "Chưa có model";
+                    box.innerHTML = `
+                        <div class="p-3 rounded-lg bg-red-950/50 border border-red-900 text-red-300 text-xs leading-relaxed">
+                            Chưa tìm thấy model đã huấn luyện tại models/best_model.
+                            Bấm <b>Train lại mô hình</b> để bắt đầu fine-tune.
+                        </div>`;
+                    return;
+                }
+                const m = info.model, mt = info.metrics;
+                badge.className = "px-3 py-1 rounded-full text-xs font-medium bg-emerald-900/60 text-emerald-300";
+                badge.textContent = "Model sẵn sàng";
+                box.innerHTML = `
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="p-2 rounded bg-slate-800"><p class="text-slate-500">Model gốc</p><p class="font-medium">${m.model_type}</p></div>
+                        <div class="p-2 rounded bg-slate-800"><p class="text-slate-500">Số nhãn</p><p class="font-medium">${m.num_labels} lớp</p></div>
+                        <div class="p-2 rounded bg-slate-800"><p class="text-slate-500">Accuracy</p><p class="font-medium text-emerald-400">${mt ? (mt.accuracy * 100).toFixed(2) + "%" : "N/A"}</p></div>
+                        <div class="p-2 rounded bg-slate-800"><p class="text-slate-500">F1 (macro)</p><p class="font-medium text-sky-400">${mt ? mt.f1_macro.toFixed(4) : "N/A"}</p></div>
+                        <div class="p-2 rounded bg-slate-800 col-span-2"><p class="text-slate-500">Recall lớp Negative</p><p class="font-medium text-red-400">${mt ? (mt.negative_recall * 100).toFixed(2) + "%" : "N/A"}</p></div>
+                        <div class="p-2 rounded bg-slate-800 col-span-2"><p class="text-slate-500">Thời gian train</p><p class="font-medium">${mt ? mt.train_time_seconds.toFixed(1) + "s" : "N/A"}</p></div>
+                    </div>`;
+            } catch (err) {
+                box.innerHTML = `<p class="text-red-400 text-xs">${err.message}</p>`;
+            }
+        }
+
+        // ---------- Card 2: Train ----------
+        let trainPoll = null;
+
+        async function startTrain() {
+            const btn = document.getElementById("btn-train");
+            const note = document.getElementById("train-note");
+            btn.disabled = true;
+            note.classList.remove("hidden");
+            note.textContent = "Đang khởi động tiến trình train...";
+            try {
+                await api("/api/train", { method: "POST" });
+                document.getElementById("train-status").classList.remove("hidden");
+                trainPoll = setInterval(pollTrainStatus, 3000);
+            } catch (err) {
+                note.textContent = err.message;
+                btn.disabled = false;
+            }
+        }
+
+        async function pollTrainStatus() {
+            const status = await api("/api/train-status");
+            const msg = document.getElementById("train-message");
+            const epoch = document.getElementById("train-epoch");
+            const progress = document.getElementById("train-progress");
+            const btn = document.getElementById("btn-train");
+
+            if (status.running) {
+                document.getElementById("train-status").classList.remove("hidden");
+                const pct = status.epoch ? Math.min(100, Math.round((status.epoch / 3) * 100)) : 5;
+                progress.style.width = pct + "%";
+                epoch.textContent = "Epoch hiện tại: " + (status.epoch || 1) + " / 3";
+            } else {
+                document.getElementById("train-spinner").classList.add("hidden");
+                if (status.done) {
+                    progress.style.width = "100%";
+                    msg.textContent = "Hoàn tất! Model mới đã được lưu.";
+                    msg.className = "text-emerald-400";
+                    await loadModelInfo();
+                } else {
+                    msg.textContent = "Có lỗi: " + status.message;
+                    msg.className = "text-red-400";
+                }
+                clearInterval(trainPoll);
+                btn.disabled = false;
+            }
+        }
+
+        // ---------- Card 3: Dự đoán ----------
+        async function predict() {
+            const text = document.getElementById("input-text").value.trim();
+            const errBox = document.getElementById("predict-error");
+            const result = document.getElementById("predict-result");
+            const badge = document.getElementById("predict-badge");
+            const bars = document.getElementById("predict-bars");
+            errBox.classList.add("hidden");
+
+            if (!text) {
+                errBox.textContent = "Vui lòng nhập bình luận trước khi phân tích.";
+                errBox.classList.remove("hidden");
+                return;
+            }
+            try {
+                const res = await api("/api/predict", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ text }),
+                });
+                result.classList.remove("hidden");
+                const maxLabel = LABELS.find(l => l.key === res.sentiment);
+                badge.className = "text-center py-2 rounded-lg font-semibold mb-3 " + maxLabel.color;
+                badge.textContent = res.sentiment_vi + " (" + res.sentiment + ") - độ tin cậy " + (res.confidence * 100).toFixed(1) + "%";
+
+                bars.innerHTML = LABELS.map(l => {
+                    const pct = (res.probabilities_vi[l.vi] * 100).toFixed(1);
+                    return `
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span>${l.vi}</span><span class="text-slate-400">${pct}%</span>
+                            </div>
+                            <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
+                                <div class="h-full ${l.color} transition-all" style="width: ${pct}%"></div>
+                            </div>
+                        </div>`;
+                }).join("");
+            } catch (err) {
+                errBox.textContent = err.message;
+                errBox.classList.remove("hidden");
+            }
+        }
+
+        document.getElementById("btn-refresh-info").addEventListener("click", loadModelInfo);
+        document.getElementById("btn-train").addEventListener("click", startTrain);
+        document.getElementById("btn-predict").addEventListener("click", predict);
+
+        // Khởi tạo: tải thông tin model khi mở trang
+        loadModelInfo();
+    </script>
+</body>
+</html>
