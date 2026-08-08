@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Dữ liệu & kết quả (tải/tạo tự động khi chạy)
+data/*.csv
+data/processed/
+models/best_model/
+results/
+utils/logs/
+
+# Môi trường
+.venv/
+venv/
+.env
+
+# macOS
+.DS_Store

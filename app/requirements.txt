@@ -1,0 +1,7 @@
+# FastAPI - Sentiment Analysis (chay noi bo sau khi co models/best_model)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+transformers>=4.41
+torch>=2.1
+pydantic>=2.6
+pydantic-settings>=2.2
