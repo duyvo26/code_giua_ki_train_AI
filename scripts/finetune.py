@@ -121,6 +121,10 @@ def fine_tune(
     datasets = build_datasets(splits, tokenizer, max_len=max_len)
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
+    # Warmup 10% số bước huấn luyện (transformers v5 bỏ warmup_ratio)
+    num_train_steps = int(np.ceil(len(datasets["train"]) / batch_size)) * num_epochs
+    warmup_steps = int(0.1 * num_train_steps)
+
     use_fp16 = torch.cuda.is_available()
     training_args = TrainingArguments(
         output_dir=str(ckpt_dir),
@@ -129,7 +133,7 @@ def fine_tune(
         per_device_eval_batch_size=batch_size,
         learning_rate=learning_rate,
         weight_decay=0.01,
-        warmup_ratio=0.1,
+        warmup_steps=warmup_steps,
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
@@ -147,7 +151,6 @@ def fine_tune(
         args=training_args,
         train_dataset=datasets["train"],
         eval_dataset=datasets["valid"],
-        tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics_fn,
         callbacks=callbacks,
