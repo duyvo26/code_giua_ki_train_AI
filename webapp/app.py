@@ -44,6 +44,11 @@ from scripts.config import (  # noqa: E402
 )
 from scripts.preprocess import clean_dataframe, normalize_text, prepare_dataset  # noqa: E402
 
+# Bots Telegram/Zalo: config + instance dùng chung toàn app
+from webapp.bots.config_manager import load_config, public_config, save_config  # noqa: E402
+from webapp.bots.telegram_bot import TelegramBot  # noqa: E402
+from webapp.bots.zalo_bot import ZaloBot  # noqa: E402
+
 # Trainer v5 yêu cầu callback kế thừa TrainerCallback, nếu không sẽ
 # AttributeError on_init_end khi Trainer gọi các hook (lỗi đã gặp khi
 # dùng class trần trong nút Train của web)
@@ -58,6 +63,26 @@ TRAIN_STATE = {"running": False, "done": False, "message": "idle", "epoch": 0}
 # frontend poll /api/train-log?since=<id cuối> chỉ nhận dòng mới
 TRAIN_LOG: deque = deque(maxlen=500)
 LOG_SEQ = itertools.count(1)
+
+# Log bot (Telegram/Zalo) - mỗi bot 1 deque, poll qua /api/bot/log
+BOT_LOGS: dict[str, deque] = {"telegram": deque(maxlen=200), "zalo": deque(maxlen=200)}
+BOT_LOG_SEQ = itertools.count(1)
+
+
+def _bot_log(bot_type: str, message: str) -> None:
+    """Callback từ bot thread: thêm dòng vào BOT_LOGS tương ứng."""
+    BOT_LOGS.get(bot_type, deque()).append(
+        {
+            "id": next(BOT_LOG_SEQ),
+            "ts": time.strftime("%H:%M:%S"),
+            "level": "INFO",
+            "msg": message,
+        }
+    )
+
+
+telegram_bot = TelegramBot(on_log=_bot_log)
+zalo_bot = ZaloBot(on_log=_bot_log)
 
 
 def _append_log(message: str, level: str = "INFO") -> None:
@@ -611,6 +636,132 @@ def train_log():
             "running": TRAIN_STATE["running"],
         }
     )
+
+
+# =====================================================================
+# Bots Telegram & Zalo
+# =====================================================================
+
+_BOT_INSTANCES = {
+    "telegram": telegram_bot,
+    "zalo": zalo_bot,
+}
+
+
+def _resolve_bot(bot_type: str):
+    """Lấy instance bot theo loại (telegram/zalo) hoặc trả None."""
+    return _BOT_INSTANCES.get(bot_type)
+
+
+@app.get("/api/bot/config")
+def bot_config():
+    """
+    Config bot an toàn: token được che (4 ký tự đầu + cuối),
+    các trường còn lại (chat_id, api_base) gửi thật để điền form.
+    """
+    return jsonify(public_config())
+
+
+@app.post("/api/bot/config")
+def bot_config_save():
+    """
+    Lưu config bot: merge từng trường, token trống KHÔNG ghi đè.
+    Nếu bot đang chạy -> dừng để áp dụng cấu hình mới (polling đọc token
+    từ config mỗi vòng nên chỉ cần chặn vòng hiện tại).
+    """
+    data = request.get_json(silent=True) or {}
+    save_config(data)
+    notes = []
+    for bot_type, bot in _BOT_INSTANCES.items():
+        if bot.is_running and bot_type in data:
+            bot.stop()
+            notes.append(f"Bot {bot_type} da dung de ap dung cau hinh - bam Bat de chay lai")
+    return jsonify({"ok": True, "config": public_config(), "notes": notes})
+
+
+@app.post("/api/bot/test")
+def bot_test():
+    """
+    Test bot: validate token (getMe) + gửi câu mẫu "Sản phẩm rất tệ!"
+    tới chat_id đã lưu (nếu có). Trả kết quả chi tiết cho web.
+    """
+    bot_type = (request.get_json(silent=True) or {}).get("type", "")
+    bot = _resolve_bot(bot_type)
+    if bot is None:
+        return jsonify({"ok": False, "error": "Loai bot khong hop le"}), 400
+
+    check = bot.get_me()
+    if not check["ok"]:
+        return jsonify({"ok": False, "error": check["error"]})
+
+    cfg = load_config()[bot_type]
+    chat_id = str(cfg.get("chat_id") or "").strip()
+    if not chat_id:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Token hop le nhung chua co chat_id - hay nhac tin cho bot truoc, "
+                         "hoac nhap chat_id vao o cau hinh",
+            }
+        )
+
+    test_text = "Sản phẩm rất tệ!"
+    sent = bot.send(chat_id, f"[TEST] Binh luan: {test_text}")
+    if not sent:
+        return jsonify({"ok": False, "error": "Gui tin nhan test that bai - xem log bot"})
+    return jsonify(
+        {
+            "ok": True,
+            "message": f"Token hop le ({check}) va da gui tin test toi chat {chat_id}",
+        }
+    )
+
+
+@app.post("/api/bot/start")
+def bot_start():
+    """Bật polling của bot theo loại (telegram/zalo)."""
+    bot_type = (request.get_json(silent=True) or {}).get("type", "")
+    bot = _resolve_bot(bot_type)
+    if bot is None:
+        return jsonify({"ok": False, "error": "Loai bot khong hop le"}), 400
+    result = bot.start()
+    return jsonify(result), (200 if result["ok"] else 400)
+
+
+@app.post("/api/bot/stop")
+def bot_stop():
+    """Dừng polling của bot theo loại."""
+    bot_type = (request.get_json(silent=True) or {}).get("type", "")
+    bot = _resolve_bot(bot_type)
+    if bot is None:
+        return jsonify({"ok": False, "error": "Loai bot khong hop le"}), 400
+    result = bot.stop()
+    return jsonify(result), (200 if result["ok"] else 400)
+
+
+@app.get("/api/bot/status")
+def bot_status():
+    """Trạng thái 2 bot: đang chạy?, có token?, chat_id, id log cuối."""
+    status = {}
+    for bot_type, bot in _BOT_INSTANCES.items():
+        cfg = load_config()[bot_type]
+        status[bot_type] = {
+            "running": bot.is_running,
+            "has_token": bool(cfg.get("token", "").strip()),
+            "chat_id": cfg.get("chat_id", ""),
+        }
+    return jsonify(status)
+
+
+@app.get("/api/bot/log")
+def bot_log():
+    """Log bot tăng dần theo since (poll 2s, giống /api/train-log)."""
+    bot_type = request.args.get("type", "")
+    since = request.args.get("since", 0, type=int)
+    log = BOT_LOGS.get(bot_type)
+    if log is None:
+        return jsonify({"lines": []})
+    return jsonify({"lines": [line for line in log if line["id"] > since]})
 
 
 if __name__ == "__main__":

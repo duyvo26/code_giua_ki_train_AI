@@ -151,16 +151,31 @@ python webapp/run_web.py --no-tunnel             # web nội bộ tại http://l
 
 ## 7. Web demo (Flask + Tailwind + Cloudflared)
 
-**Giao diện (dark theme OLED, font Inter) gồm 6 khu vực:**
+**Giao diện (dark theme OLED, font Inter) gồm 3 tab:**
 
+### Tab 1 - Tổng quan
 | Khu vực | Mô tả | API phía sau |
 |---|---|---|
 | **4 KPI cards** | Accuracy · F1-macro · **Recall lớp Negative** · Thời gian train | `GET /api/model-info` |
 | **Huấn luyện** | Bảng **tham số train** (model, epochs, lr, batch, warmup, optimizer, FP16, seed, kích thước dataset) + nút Train + thanh epoch + phase chips | `GET /api/train-config` + `POST /api/train` + `GET /api/train-status` |
 | **Thông tin model** | Model gốc, số nhãn, Accuracy, F1, Precision/Recall macro, Recall Negative, đường dẫn | `GET /api/model-info` |
-| **Phân tích dữ liệu** | ① Dữ liệu gốc (thống kê 3 split + mẫu thô) ② Tiền xử lý (bảng làm sạch + 5 bước chuẩn hoá + Before/After thật) ③ Label mapping + phân bố nhãn theo split (thanh %) | `GET /api/data-info` |
+| **Phân tích dữ liệu** | ① Dữ liệu gốc ② Tiền xử lý (bảng làm sạch + 5 bước chuẩn hoá + Before/After thật) ③ Label mapping + phân bố ④ **Tokenization** (token chips, input_ids, attention_mask, thống kê 300 câu) ⑤ **Chia dữ liệu** (% + note test cách ly) | `GET /api/data-info` |
 | **Log huấn luyện** | Terminal realtime: bắt print + log Trainer (loss, lr, epoch, eval acc/F1), màu theo level, auto-scroll, nút Sao chép/Xoá | `GET /api/train-log?since=N` (poll 2s) |
 | **Dự đoán cảm xúc** | Textarea + 4 chip ví dụ + badge nhãn + 3 thanh xác suất % | `POST /api/predict` |
+
+### Tab 2 - API · Model · Dataset
+- **API URLs**: bảng endpoint tự sinh từ `app.url_map` + nút Sao chép + ví dụ curl
+- **Model train**: id2label, bảng metrics từng lớp (P/R/F1/Support), **biểu đồ đánh giá** (learning curve, confusion matrix, PR curve), **bảng so sánh 3 mô hình** (cần chạy `run_pipeline.py`)
+- **Model dataset**: nguồn UIT-VSFC (link HF + paper), thống kê làm sạch, label mapping, phân bố
+
+### Tab 3 - Bots (Telegram + Zalo)
+| Bot | Cấu hình | Nhận tin | Reply |
+|---|---|---|---|
+| **Telegram** | Token từ @BotFather (nhập ẩn trên web, lưu `utils/bot_config.json` gitignored) | Long-polling `getUpdates` (không cần webhook) | Nhãn + xác suất % 3 lớp qua `sendMessage` |
+| **Zalo Bot Creator** | Token `id:secret` từ bot.zaloplatforms.com + **API base** (mặc định `bot-api.zaloplatforms.com`, có thể đổi vd `bot-api.zapps.me`) | Long-polling `getUpdates` (1 update/call) | Reply chunk ≤2000 ký tự |
+
+- Chat ID tự lưu khi bot nhận tin đầu tiên; nút Kiểm tra token (`getMe`), Gửi test, Bật/Tắt polling, badge trạng thái, log bot realtime.
+- Token chỉ nằm trong `utils/bot_config.json` (gitignored) — không bao giờ commit.
 
 **Bảo mật dữ liệu:** tokenizer + model + inference chạy 100% cục bộ — bình luận khách hàng không gửi ra ngoài (Cloudflared chỉ là đường ống truyền web).
 

@@ -9,6 +9,9 @@ data/processed/
 models/best_model/
 results/
 
+# Bí mật - token bot không bao giờ commit
+utils/bot_config.json
+
 # Môi trường
 .venv/
 venv/

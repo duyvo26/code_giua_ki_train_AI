@@ -71,6 +71,10 @@
                 class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-border bg-muted text-slate-400 hover:text-slate-200 transition-colors duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:outline-none">
             API · Model · Dataset
         </button>
+        <button data-tab="bots"
+                class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-border bg-muted text-slate-400 hover:text-slate-200 transition-colors duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:outline-none">
+            Bots
+        </button>
     </nav>
 
     <div id="tab-overview">
@@ -250,6 +254,94 @@
 
     </main>
     </div><!-- /tab-info -->
+
+    <!-- Tab: Bots -->
+    <div id="tab-bots" class="hidden">
+    <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+        <div class="grid lg:grid-cols-2 gap-6">
+
+            <!-- Card Telegram -->
+            <section class="bg-surface border border-border rounded-xl p-5">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="font-semibold flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-sky-400"></span> Telegram Bot
+                    </h2>
+                    <span id="tg-badge" class="px-3 py-1 rounded-full text-[11px] font-medium bg-muted text-slate-400 border border-border">Đang tải...</span>
+                </div>
+                <div class="space-y-3 text-sm">
+                    <div>
+                        <label class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Bot token (từ @BotFather)</label>
+                        <input id="tg-token" type="password" placeholder="123456:ABC-DEF..."
+                               class="w-full bg-slate-900 border border-border rounded-md px-2.5 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-sky-500">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Chat ID (tự lưu khi bot nhận tin)</label>
+                        <input id="tg-chatid" type="text" placeholder="tự động cập nhật"
+                               class="w-full bg-slate-900 border border-border rounded-md px-2.5 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-sky-500">
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="tg-save" class="px-3 py-1.5 rounded-md bg-muted hover:bg-slate-700/70 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Lưu cấu hình</button>
+                        <button id="tg-check" class="px-3 py-1.5 rounded-md bg-muted hover:bg-slate-700/70 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Kiểm tra token</button>
+                        <button id="tg-test" class="px-3 py-1.5 rounded-md bg-sky-950/60 hover:bg-sky-900/60 text-sky-300 border border-sky-900 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Gửi test</button>
+                        <button id="tg-start" class="px-3 py-1.5 rounded-md bg-accent hover:bg-emerald-400 text-slate-900 text-[11px] font-semibold transition-colors duration-200 cursor-pointer">Bật bot</button>
+                        <button id="tg-stop" class="px-3 py-1.5 rounded-md bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-900 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Tắt</button>
+                    </div>
+                    <p id="tg-note" class="text-[11px] text-slate-500 leading-relaxed">Long-polling - không cần webhook. Nhắn tin cho bot trên Telegram để test, bot sẽ trả nhãn + xác suất %. Trong group cần @mention và /setprivacy.</p>
+                </div>
+            </section>
+
+            <!-- Card Zalo -->
+            <section class="bg-surface border border-border rounded-xl p-5">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="font-semibold flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Zalo Bot Creator
+                    </h2>
+                    <span id="zl-badge" class="px-3 py-1 rounded-full text-[11px] font-medium bg-muted text-slate-400 border border-border">Đang tải...</span>
+                </div>
+                <div class="space-y-3 text-sm">
+                    <div>
+                        <label class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Bot token (từ bot.zaloplatforms.com, dạng id:secret)</label>
+                        <input id="zl-token" type="password" placeholder="123456789:abc-xyz"
+                               class="w-full bg-slate-900 border border-border rounded-md px-2.5 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">API base</label>
+                        <input id="zl-base" type="text" placeholder="https://bot-api.zaloplatforms.com"
+                               class="w-full bg-slate-900 border border-border rounded-md px-2.5 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Chat ID (tự lưu khi bot nhận tin)</label>
+                        <input id="zl-chatid" type="text" placeholder="tự động cập nhật"
+                               class="w-full bg-slate-900 border border-border rounded-md px-2.5 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="zl-save" class="px-3 py-1.5 rounded-md bg-muted hover:bg-slate-700/70 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Lưu cấu hình</button>
+                        <button id="zl-check" class="px-3 py-1.5 rounded-md bg-muted hover:bg-slate-700/70 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Kiểm tra token</button>
+                        <button id="zl-test" class="px-3 py-1.5 rounded-md bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-900 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Gửi test</button>
+                        <button id="zl-start" class="px-3 py-1.5 rounded-md bg-accent hover:bg-emerald-400 text-slate-900 text-[11px] font-semibold transition-colors duration-200 cursor-pointer">Bật bot</button>
+                        <button id="zl-stop" class="px-3 py-1.5 rounded-md bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-900 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Tắt</button>
+                    </div>
+                    <p id="zl-note" class="text-[11px] text-slate-500 leading-relaxed">Bot Creator - long-polling, không cần webhook/HTTPS. Nhắn tin cho bot trên Zalo để test. Nếu tài khoản dùng base khác (vd bot-api.zapps.me) hãy sửa API base.</p>
+                </div>
+            </section>
+        </div>
+
+        <!-- Log bot -->
+        <section class="bg-surface border border-border rounded-xl p-5">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="font-semibold flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Log bot
+                </h2>
+                <button id="btn-clear-botlog" class="px-3 py-1.5 rounded-md bg-muted hover:bg-slate-700/70 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Xoá log</button>
+            </div>
+            <div id="bot-log-panel" class="h-56 overflow-y-auto bg-[#0B0F1A] border border-border rounded-lg p-3 font-mono text-[11px] leading-relaxed">
+                <p class="text-slate-600">Chưa có hoạt động bot.</p>
+            </div>
+        </section>
+
+    </main>
+    </div><!-- /tab-bots -->
 
     <footer class="max-w-7xl mx-auto px-4 pb-8 text-center text-[11px] text-slate-600">
         Máy học nâng cao - 25MIT-1A | PhoBERT-base-v2 fine-tuned trên UIT-VSFC | Dữ liệu xử lý 100% cục bộ
@@ -673,6 +765,7 @@
         function switchTab(name) {
             document.getElementById("tab-overview").classList.toggle("hidden", name !== "overview");
             document.getElementById("tab-info").classList.toggle("hidden", name !== "info");
+            document.getElementById("tab-bots").classList.toggle("hidden", name !== "bots");
             document.querySelectorAll(".tab-btn").forEach(b => {
                 const active = b.dataset.tab === name;
                 b.classList.toggle("bg-surface", active);
@@ -685,6 +778,14 @@
                 loadEndpoints();
                 loadModelDetail();
                 loadDatasetDetail();
+            }
+            if (name === "bots") {
+                loadBotConfig();
+                if (botLogPoll) clearInterval(botLogPoll);
+                botLogPoll = setInterval(pollBotLog, 2000);
+            } else if (botLogPoll) {
+                clearInterval(botLogPoll);
+                botLogPoll = null;
             }
         }
 
@@ -917,12 +1018,133 @@
             }
         }
 
+        // ---------- Tab: Bots ----------
+        const BOT_LOGS_SINCE = { telegram: 0, zalo: 0 };
+        let botLogPoll = null;
+
+        async function loadBotConfig() {
+            try {
+                const cfg = await api("/api/bot/config");
+                document.getElementById("tg-token").placeholder = cfg.telegram.token || "123456:ABC-DEF... (chưa có token)";
+                document.getElementById("tg-chatid").value = cfg.telegram.chat_id || "";
+                document.getElementById("zl-token").placeholder = cfg.zalo.token || "id:secret (chưa có token)";
+                document.getElementById("zl-base").value = cfg.zalo.api_base;
+                document.getElementById("zl-chatid").value = cfg.zalo.chat_id || "";
+                await refreshBotStatus();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function refreshBotStatus() {
+            const st = await api("/api/bot/status");
+            ["tg", "zl"].forEach(prefix => {
+                const type = prefix === "tg" ? "telegram" : "zalo";
+                const badge = document.getElementById(prefix + "-badge");
+                const s = st[type];
+                if (s.running) {
+                    badge.className = "px-3 py-1 rounded-full text-[11px] font-medium bg-emerald-950/60 text-emerald-300 border border-emerald-900";
+                    badge.textContent = "Đang chạy";
+                } else if (!s.has_token) {
+                    badge.className = "px-3 py-1 rounded-full text-[11px] font-medium bg-red-950/60 text-red-300 border border-red-900";
+                    badge.textContent = "Chưa có token";
+                } else {
+                    badge.className = "px-3 py-1 rounded-full text-[11px] font-medium bg-amber-950/60 text-amber-300 border border-amber-900";
+                    badge.textContent = "Dừng";
+                }
+            });
+        }
+
+        function collectBotConfig(prefix) {
+            const type = prefix === "tg" ? "telegram" : "zalo";
+            const payload = { [type]: {} };
+            const token = document.getElementById(prefix + "-token").value.trim();
+            if (token) payload[type].token = token;
+            const chatId = document.getElementById(prefix + "-chatid").value.trim();
+            if (chatId) payload[type].chat_id = chatId;
+            if (type === "zalo") {
+                const base = document.getElementById("zl-base").value.trim();
+                if (base) payload.zalo.api_base = base;
+            }
+            return payload;
+        }
+
+        async function saveBot(prefix) {
+            const note = document.getElementById(prefix + "-note");
+            try {
+                const res = await api("/api/bot/config", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(collectBotConfig(prefix)),
+                });
+                note.textContent = "Đã lưu cấu hình." + (res.notes || []).join(" ");
+                document.getElementById(prefix + "-token").value = "";
+                await loadBotConfig();
+            } catch (err) {
+                note.textContent = "Lỗi: " + err.message;
+            }
+        }
+
+        async function checkBot(prefix) {
+            const note = document.getElementById(prefix + "-note");
+            try {
+                await api("/api/bot/config", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(collectBotConfig(prefix)),
+                });
+                const res = await api("/api/bot/test", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ type: prefix === "tg" ? "telegram" : "zalo" }),
+                });
+                note.textContent = res.ok
+                    ? "Token hợp lệ" + (res.message ? " - " + res.message : "")
+                    : "Lỗi: " + (res.error || "không xác định");
+            } catch (err) {
+                note.textContent = "Lỗi: " + err.message;
+            }
+        }
+
+        async function toggleBot(prefix, action) {
+            const note = document.getElementById(prefix + "-note");
+            try {
+                const res = await api("/api/bot/" + action, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ type: prefix === "tg" ? "telegram" : "zalo" }),
+                });
+                note.textContent = res.message || res.error || "";
+                await refreshBotStatus();
+            } catch (err) {
+                note.textContent = "Lỗi: " + err.message;
+            }
+        }
+
+        async function pollBotLog() {
+            for (const [type, since] of Object.entries(BOT_LOGS_SINCE)) {
+                const data = await api("/api/bot/log?type=" + type + "&since=" + since);
+                if (!data.lines.length) continue;
+                BOT_LOGS_SINCE[type] = Math.max(...data.lines.map(l => l.id));
+                const panel = document.getElementById("bot-log-panel");
+                if (panel.querySelector("p")) panel.innerHTML = "";
+                data.lines.forEach(l => {
+                    const div = document.createElement("div");
+                    div.className = "whitespace-pre-wrap break-words text-slate-300";
+                    div.textContent = `[${l.ts}] [${type}] ${l.msg}`;
+                    panel.appendChild(div);
+                });
+                panel.scrollTop = panel.scrollHeight;
+            }
+        }
+
         // ---------- Khởi tạo ----------
         document.querySelectorAll(".tab-btn").forEach(btn =>
             btn.addEventListener("click", () => switchTab(btn.dataset.tab)));
         document.getElementById("btn-refresh-info").addEventListener("click", loadModelInfo);
         document.getElementById("btn-train").addEventListener("click", startTrain);
         document.getElementById("btn-predict").addEventListener("click", predict);
+        document.getElementById("btn-refresh-data").addEventListener("click", loadDataInfo);
         document.getElementById("btn-copy-log").addEventListener("click", async () => {
             const text = Array.from(document.querySelectorAll("#log-panel div")).map(d => d.textContent).join("\n");
             await navigator.clipboard.writeText(text);
@@ -930,6 +1152,22 @@
         document.getElementById("btn-clear-log").addEventListener("click", () => {
             document.getElementById("log-panel").innerHTML = '<p class="text-slate-600">Log đã xoá.</p>';
             logSince = 0;
+        });
+        // Bots
+        document.getElementById("tg-save").addEventListener("click", () => saveBot("tg"));
+        document.getElementById("tg-check").addEventListener("click", () => checkBot("tg"));
+        document.getElementById("tg-test").addEventListener("click", () => checkBot("tg"));
+        document.getElementById("tg-start").addEventListener("click", () => toggleBot("tg", "start"));
+        document.getElementById("tg-stop").addEventListener("click", () => toggleBot("tg", "stop"));
+        document.getElementById("zl-save").addEventListener("click", () => saveBot("zl"));
+        document.getElementById("zl-check").addEventListener("click", () => checkBot("zl"));
+        document.getElementById("zl-test").addEventListener("click", () => checkBot("zl"));
+        document.getElementById("zl-start").addEventListener("click", () => toggleBot("zl", "start"));
+        document.getElementById("zl-stop").addEventListener("click", () => toggleBot("zl", "stop"));
+        document.getElementById("btn-clear-botlog").addEventListener("click", () => {
+            document.getElementById("bot-log-panel").innerHTML = '<p class="text-slate-600">Log đã xoá.</p>';
+            BOT_LOGS_SINCE.telegram = 0;
+            BOT_LOGS_SINCE.zalo = 0;
         });
 
         loadModelInfo();
