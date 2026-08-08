@@ -281,9 +281,13 @@ def _align_labels(
     from .config import LABEL_TO_ID
 
     short_names = {"neg": "negative", "pos": "positive", "neu": "neutral"}
+    # Chuẩn hoá key id2label về str - config của transformers trả key int
+    # ({0: 'NEG'}) hoặc str ({'0': 'NEG'}) tuỳ nguồn
+    label_map = {str(k): v for k, v in id2label.items()}
+
     idx_to_canon: dict[int, int] = {}
     for idx in range(proba.shape[1]):
-        name = str(id2label.get(str(idx), "")).lower().strip()
+        name = str(label_map.get(str(idx), "")).lower().strip()
         if name in short_names:
             name = short_names[name]
         if name not in LABEL_TO_ID:
