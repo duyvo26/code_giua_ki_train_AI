@@ -10,6 +10,7 @@ import contextlib
 import io
 import itertools
 import json
+import re
 import sys
 import threading
 import time
@@ -101,11 +102,26 @@ class _LogWriter(io.StringIO):
     """
     Bắt print() từ fine_tune()/prepare_dataset() (vd "[finetune] ...",
     "[tokenize] ...") đẩy vào TRAIN_LOG thay vì stdout console.
+
+    Lọc nhiễu:
+      - Mã màu ANSI (tqdm dùng \x1b[A để cập nhật progress bar)
+      - Dòng progress bar tqdm (chứa "it/s]" hoặc bắt đầu bằng "0%|")
+      - Raw dict log của Trainer ('{loss': ...) - đã có dòng format đẹp
+        từ LogCaptureCallback nên không cần lặp lại
     """
 
+    ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
     def write(self, text: str) -> int:
-        line = text.strip()
-        if line:
+        clean = self.ANSI_RE.sub("", text)
+        for raw_line in clean.split("\r"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("{") and line.endswith("}"):
+                continue
+            if re.match(r"^\s*\d+%\|", line) or "it/s]" in line or "s/it]" in line:
+                continue
             _append_log(line, "INFO")
         return len(text)
 
@@ -160,6 +176,40 @@ def health():
     và cho dashboard giám sát nội bộ).
     """
     return jsonify({"status": "ok", "model_loaded": (BEST_MODEL_DIR / "config.json").exists()})
+
+
+# Mô tả cho tab "API URLs" trên web - nguồn duy nhất cho /api/endpoints
+ENDPOINT_DESCRIPTIONS = {
+    "/health": "Kiểm tra server sẵn sàng",
+    "/api/model-info": "Thông tin model đã train + metrics (Accuracy, F1, Recall Negative)",
+    "/api/train-config": "Tham số huấn luyện + kích thước bộ dữ liệu",
+    "/api/data-info": "Phân tích dữ liệu UIT-VSFC (data gốc, tiền xử lý, mapping nhãn)",
+    "/api/predict": "Dự đoán cảm xúc 1 bình luận (POST {\"text\": \"...\"})",
+    "/api/train": "Bắt đầu train lại với tham số tuỳ chỉnh (POST)",
+    "/api/train-status": "Trạng thái huấn luyện - frontend poll",
+    "/api/train-log": "Log huấn luyện tăng dần (GET ?since=N)",
+    "/api/endpoints": "Danh sách API của hệ thống",
+}
+
+
+@app.get("/api/endpoints")
+def endpoints():
+    """
+    Danh sách API của hệ thống - tự sinh từ app.url_map nên không bao giờ
+    lệch với route thật, kèm mô tả từ ENDPOINT_DESCRIPTIONS.
+    """
+    items = []
+    for rule in app.url_map.iter_rules():
+        if rule.rule == "/health" or rule.rule.startswith("/api"):
+            methods = sorted(m for m in rule.methods if m in ("GET", "POST"))
+            items.append(
+                {
+                    "path": rule.rule,
+                    "methods": methods,
+                    "description": ENDPOINT_DESCRIPTIONS.get(rule.rule, ""),
+                }
+            )
+    return jsonify({"endpoints": items})
 
 
 @app.get("/api/model-info")
@@ -353,7 +403,14 @@ def train():
         param_line = ", ".join(f"{k}={v}" for k, v in params.items())
         _append_log(f"=== BAT DAU HUAN LUYEN | {param_line} ===", "EPOCH")
         try:
-            from scripts.finetune import fine_tune
+            from scripts.evaluate import (
+                evaluate_transformer,
+                print_metrics_table,
+                save_confusion_matrix,
+                save_metrics_json,
+                save_pr_curve,
+            )
+            from scripts.finetune import fine_tune, load_sentiment_model
 
             # Bắt print() của pipeline -> TRAIN_LOG (web hiển thị realtime)
             writer = _LogWriter()
@@ -371,6 +428,26 @@ def train():
                     seed=params["seed"],
                     callbacks=[TrainProgressCallback(), LogCaptureCallback()],
                 )
+                # Đánh giá ngay trên test -> sinh metrics JSON + CM + PR curve
+                # (giống run_pipeline.py, để KPI/model-info/tab Model hiển thị đúng)
+                _append_log("[phase] Danh gia tren tap test...", "EPOCH")
+                model, tokenizer = load_sentiment_model()
+                metrics, y_true, y_pred, proba = evaluate_transformer(
+                    model,
+                    tokenizer,
+                    splits["test"],
+                    model_name="PhoBERT-base-v2 (fine-tuned)",
+                )
+                print_metrics_table(metrics)
+                save_confusion_matrix(
+                    y_true, y_pred, "phobert_finetuned",
+                    "Confusion Matrix - PhoBERT-base-v2 fine-tuned",
+                )
+                save_pr_curve(
+                    y_true, proba, "phobert_finetuned",
+                    "Precision-Recall - PhoBERT-base-v2 fine-tuned",
+                )
+                save_metrics_json(metrics, "phobert_finetuned")
             TRAIN_STATE.update(running=False, done=True, message="done")
             _append_log("=== HOAN TAT - model da luu tai models/best_model ===", "EPOCH")
         except Exception as exc:  # noqa: BLE001 - lỗi nền cần báo về web
