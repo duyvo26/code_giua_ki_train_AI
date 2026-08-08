@@ -120,6 +120,33 @@ def _read_json(path: Path) -> dict | None:
         return None
 
 
+def _validate_train_params(data: dict) -> dict:
+    """
+    Kiểm tra + giới hạn tham số train gửi từ web (tránh giá trị phá huỷ).
+
+    Logic:
+      - Thiếu key -> dùng mặc định từ scripts/config.py
+      - Giá trị ngoài khoảng cho phép -> kẹp về biên gần nhất
+    """
+
+    def clamp(key: str, default: float, lo: float, hi: float, cast=float) -> float:
+        try:
+            value = cast(data.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        return max(lo, min(hi, value))
+
+    return {
+        "epochs": clamp("epochs", NUM_EPOCHS, 1, 10, int),
+        "learning_rate": clamp("learning_rate", LEARNING_RATE, 1e-6, 1e-2, float),
+        "batch_size": clamp("batch_size", BATCH_SIZE, 2, 64, int),
+        "max_len": clamp("max_len", MAX_LEN, 64, 512, int),
+        "weight_decay": clamp("weight_decay", 0.01, 0.0, 0.1, float),
+        "warmup_ratio": clamp("warmup_ratio", 0.1, 0.0, 0.5, float),
+        "seed": clamp("seed", SEED, 0, 2**31 - 1, int),
+    }
+
+
 @app.get("/")
 def index():
     """Trang chủ: render giao diện Tailwind."""
@@ -309,15 +336,22 @@ def train():
 
     Logic:
       - Nếu đang train -> từ chối (409)
+      - Nhận tham số tuỳ chỉnh {epochs, learning_rate, batch_size, max_len,
+        weight_decay, warmup_ratio, seed} -> validate -> truyền vào fine_tune()
       - Thread nền gọi prepare_dataset() (cache CSV nhanh) + fine_tune()
       - TRAIN_STATE + TRAIN_LOG cập nhật realtime để frontend poll
     """
     if TRAIN_STATE["running"]:
         return jsonify({"error": "Mô hình đang được huấn luyện, vui lòng chờ"}), 409
 
+    data = request.get_json(silent=True) or {}
+    params = _validate_train_params(data)
+    TRAIN_STATE["params"] = params
+
     def _run_train():
         TRAIN_STATE.update(running=True, done=False, message="preparing", epoch=0)
-        _append_log("=== BAT DAU HUAN LUYEN ===", "EPOCH")
+        param_line = ", ".join(f"{k}={v}" for k, v in params.items())
+        _append_log(f"=== BAT DAU HUAN LUYEN | {param_line} ===", "EPOCH")
         try:
             from scripts.finetune import fine_tune
 
@@ -328,6 +362,13 @@ def train():
                 _append_log("[phase] Tien xu ly du lieu xong - tokenize & fine-tune...", "EPOCH")
                 fine_tune(
                     splits,
+                    num_epochs=params["epochs"],
+                    learning_rate=params["learning_rate"],
+                    batch_size=params["batch_size"],
+                    max_len=params["max_len"],
+                    weight_decay=params["weight_decay"],
+                    warmup_ratio=params["warmup_ratio"],
+                    seed=params["seed"],
                     callbacks=[TrainProgressCallback(), LogCaptureCallback()],
                 )
             TRAIN_STATE.update(running=False, done=True, message="done")

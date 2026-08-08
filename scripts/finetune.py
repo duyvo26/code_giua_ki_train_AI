@@ -91,6 +91,8 @@ def fine_tune(
     num_epochs: int = NUM_EPOCHS,
     learning_rate: float = LEARNING_RATE,
     batch_size: int = BATCH_SIZE,
+    weight_decay: float = 0.01,
+    warmup_ratio: float = 0.1,
     seed: int = SEED,
     max_len: int = MAX_LEN,
     callbacks: list | None = None,
@@ -100,6 +102,9 @@ def fine_tune(
     trả về Trainer đã huấn luyện xong.
 
     Args:
+        weight_decay (float): hệ số giảm trọng số (weight decay) của AdamW
+        warmup_ratio (float): tỷ lệ số bước warmup trên tổng số bước
+            (web cho phép người dùng chỉnh trước khi bấm Train)
         callbacks (list | None): danh sách TrainerCallback bổ sung
             (ví dụ: callback cập nhật tiến trình epoch cho web Flask)
     """
@@ -121,9 +126,9 @@ def fine_tune(
     datasets = build_datasets(splits, tokenizer, max_len=max_len)
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-    # Warmup 10% số bước huấn luyện (transformers v5 bỏ warmup_ratio)
+    # Warmup theo tỷ lệ người dùng chọn (transformers v5 bỏ warmup_ratio)
     num_train_steps = int(np.ceil(len(datasets["train"]) / batch_size)) * num_epochs
-    warmup_steps = int(0.1 * num_train_steps)
+    warmup_steps = int(warmup_ratio * num_train_steps)
 
     use_fp16 = torch.cuda.is_available()
     training_args = TrainingArguments(
@@ -132,7 +137,7 @@ def fine_tune(
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=batch_size,
         learning_rate=learning_rate,
-        weight_decay=0.01,
+        weight_decay=weight_decay,
         warmup_steps=warmup_steps,
         eval_strategy="epoch",
         save_strategy="epoch",

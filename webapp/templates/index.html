@@ -91,7 +91,7 @@
                     <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse" id="train-dot"></span> Huấn luyện
                 </h2>
 
-                <!-- Tham số train -->
+                <!-- Tham số train (nhập được, pre-fill từ /api/train-config) -->
                 <div id="train-params" class="text-xs mb-5">
                     <p class="text-slate-500 mb-2">Đang tải tham số...</p>
                 </div>
@@ -253,31 +253,66 @@
             }
         }
 
-        // ---------- Tham số huấn luyện ----------
+        // ---------- Tham số huấn luyện (form nhập được) ----------
+        const PARAM_FIELDS = [
+            { key: "epochs",       label: "Epochs",         step: 1,      min: 1,  max: 10 },
+            { key: "learning_rate", label: "Learning rate",  step: 0.00001, min: 0.000001, max: 0.01 },
+            { key: "batch_size",   label: "Batch size",      step: 1,      min: 2,  max: 64 },
+            { key: "max_len",      label: "Max len",         step: 1,      min: 64, max: 512 },
+            { key: "warmup_ratio", label: "Warmup %",        step: 5,      min: 0,  max: 50, pct: true },
+            { key: "weight_decay", label: "Weight decay",    step: 0.005,  min: 0,  max: 0.1 },
+            { key: "seed",         label: "Seed",            step: 1,      min: 0,  max: 2147483647 },
+        ];
+
+        function fieldInput(f) {
+            return `
+                <div>
+                    <label for="p-${f.key}" class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">${f.label}</label>
+                    <input id="p-${f.key}" type="number" step="${f.step}" min="${f.min}" max="${f.max}"
+                           class="w-full bg-slate-900 border border-border rounded-md px-2 py-1.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>`;
+        }
+
         async function loadTrainConfig() {
             const box = document.getElementById("train-params");
             try {
                 const c = await api("/api/train-config");
                 const sizes = c.dataset_sizes;
                 const fmt = n => n === null ? "chưa có" : n.toLocaleString("vi-VN");
+                const warmupPct = Math.round(c.warmup_ratio * 100);
                 box.innerHTML = `
-                    <div class="grid grid-cols-2 gap-2 text-xs">
-                        <div class="p-2 rounded bg-muted/60 col-span-2"><p class="text-slate-500">Model gốc</p><p class="font-mono text-[11px] text-sky-400 break-all">${c.model}</p></div>
-                        <div class="p-2 rounded bg-muted/60"><p class="text-slate-500">Epochs</p><p class="font-medium">${c.epochs}</p></div>
-                        <div class="p-2 rounded bg-muted/60"><p class="text-slate-500">Learning rate</p><p class="font-medium">${c.learning_rate}</p></div>
-                        <div class="p-2 rounded bg-muted/60"><p class="text-slate-500">Batch size</p><p class="font-medium">${c.batch_size}</p></div>
-                        <div class="p-2 rounded bg-muted/60"><p class="text-slate-500">Max len</p><p class="font-medium">${c.max_len}</p></div>
-                        <div class="p-2 rounded bg-muted/60"><p class="text-slate-500">Warmup</p><p class="font-medium">${(c.warmup_ratio * 100)}%</p></div>
-                        <div class="p-2 rounded bg-muted/60"><p class="text-slate-500">Weight decay</p><p class="font-medium">${c.weight_decay}</p></div>
-                        <div class="p-2 rounded bg-muted/60"><p class="text-slate-500">Optimizer</p><p class="font-medium">${c.optimizer}</p></div>
-                        <div class="p-2 rounded bg-muted/60"><p class="text-slate-500">FP16 (GPU)</p><p class="font-medium">${c.fp16 ? "Bật" : "Tắt"}</p></div>
-                        <div class="p-2 rounded bg-muted/60"><p class="text-slate-500">Seed</p><p class="font-medium">${c.seed}</p></div>
-                        <div class="p-2 rounded bg-muted/60 col-span-2"><p class="text-slate-500">Dữ liệu (sau làm sạch)</p>
-                            <p class="font-medium">Train <b class="text-emerald-400">${fmt(sizes.train)}</b> · Valid <b class="text-sky-400">${fmt(sizes.valid)}</b> · Test <b class="text-amber-400">${fmt(sizes.test)}</b></p></div>
-                    </div>`;
+                    <div class="p-2 rounded bg-muted/40 border border-border/50 mb-3">
+                        <p class="text-slate-500 text-[10px] uppercase mb-0.5">Model gốc (cố định)</p>
+                        <p class="font-mono text-[11px] text-sky-400 break-all">${c.model}</p>
+                        <p class="text-slate-500 text-[10px] uppercase mt-2 mb-0.5">Optimizer / FP16 (cố định)</p>
+                        <p class="text-[11px] text-slate-300">${c.optimizer} · FP16 ${c.fp16 ? "Bật" : "Tắt"}</p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        ${PARAM_FIELDS.map(fieldInput).join("")}
+                    </div>
+                    <p class="text-slate-500 text-[10px] uppercase mt-3 mb-1">Dữ liệu (sau làm sạch, tự động)</p>
+                    <p class="text-[11px] text-slate-300">Train <b class="text-emerald-400">${fmt(sizes.train)}</b> · Valid <b class="text-sky-400">${fmt(sizes.valid)}</b> · Test <b class="text-amber-400">${fmt(sizes.test)}</b></p>`;
+                document.getElementById("p-epochs").value = c.epochs;
+                document.getElementById("p-learning_rate").value = c.learning_rate;
+                document.getElementById("p-batch_size").value = c.batch_size;
+                document.getElementById("p-max_len").value = c.max_len;
+                document.getElementById("p-warmup_ratio").value = warmupPct;
+                document.getElementById("p-weight_decay").value = c.weight_decay;
+                document.getElementById("p-seed").value = c.seed;
             } catch (err) {
                 box.innerHTML = `<p class="text-red-400 text-xs">${err.message}</p>`;
             }
+        }
+
+        function collectTrainParams() {
+            const raw = {};
+            PARAM_FIELDS.forEach(f => {
+                let v = parseFloat(document.getElementById("p-" + f.key).value);
+                if (isNaN(v)) v = null;
+                if (f.pct) v = v === null ? null : v / 100;
+                raw[f.key] = v;
+            });
+            return raw;
         }
 
         // ---------- Phân tích dữ liệu ----------
@@ -390,7 +425,12 @@
             note.classList.remove("hidden");
             note.textContent = "Đang khởi động tiến trình train...";
             try {
-                await api("/api/train", { method: "POST" });
+                const params = collectTrainParams();
+                await api("/api/train", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(params),
+                });
                 document.getElementById("train-status").classList.remove("hidden");
                 setPhase(0);
                 trainPoll = setInterval(pollTrainStatus, 3000);
