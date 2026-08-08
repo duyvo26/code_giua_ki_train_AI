@@ -51,6 +51,13 @@ def _run_reference_model(splits: dict) -> dict:
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
     from scripts.config import PUBLIC_SENTIMENT_MODEL
+    from scripts.evaluate import (
+        evaluate_transformer,
+        print_metrics_table,
+        save_confusion_matrix,
+        save_metrics_json,
+        save_pr_curve,
+    )
 
     print("\n=== Thuc nghiem 2: PhoBERT fine-tuned san (doi chung) ===")
     tokenizer = AutoTokenizer.from_pretrained(PUBLIC_SENTIMENT_MODEL)
@@ -84,6 +91,14 @@ def _run_finetune_and_eval(splits: dict, skip_finetune: bool) -> dict | None:
       - evaluate_transformer chạy inference trên test (test chưa từng
         xuất hiện trong huấn luyện -> đo khả năng tổng quát thật)
     """
+    from scripts.config import BEST_MODEL_DIR
+    from scripts.evaluate import (
+        evaluate_transformer,
+        print_metrics_table,
+        save_confusion_matrix,
+        save_metrics_json,
+        save_pr_curve,
+    )
     from scripts.finetune import fine_tune, load_sentiment_model
 
     print("\n=== Thuc nghiem 3: Fine-tuning PhoBERT-base-v2 ===")
