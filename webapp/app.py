@@ -57,6 +57,15 @@ def index():
     return render_template("index.html")
 
 
+@app.get("/health")
+def health():
+    """
+    Kiểm tra server sẵn sàng (dùng cho run_web.py chờ Flask khởi động
+    và cho dashboard giám sát nội bộ).
+    """
+    return jsonify({"status": "ok", "model_loaded": (BEST_MODEL_DIR / "config.json").exists()})
+
+
 @app.get("/api/model-info")
 def model_info():
     """
