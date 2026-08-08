@@ -1,6 +1,6 @@
 # Map — code_giua_ki_train_AI (Chặng 6: Sentiment Analysis tiếng Việt)
 
-Bản đồ chi tiết thư mục `code_giua_ki_train_AI/`. Xem `map.md` ở thư mục gốc dự án để có sơ đồ tổng thể.
+Bản đồ chi tiết thư mục `code_giua_ki_train_AI/`. Xem `map.md` ở thư mục gốc dự án cho sơ đồ tổng thể + công nghệ; README.md cho hướng dẫn chạy đầy đủ.
 
 ## Mục lục
 
@@ -14,7 +14,7 @@ Bản đồ chi tiết thư mục `code_giua_ki_train_AI/`. Xem `map.md` ở th�
 
 ```text
 Thực nghiệm (Colab)                              Web demo (Colab + tunnel)
-UIT-VSFC -> Fine-tune PhoBERT   ->              Flask /api/predict -> UI Tailwind
+UIT-VSFC -> Fine-tune PhoBERT-base-v2  ->       Flask /api/predict -> UI Tailwind
                 |                                        |
                 v                                        v
           models/best_model  ----------------->  scripts.finetune (inference cục bộ)
@@ -32,7 +32,7 @@ UIT-VSFC -> Fine-tune PhoBERT   ->              Flask /api/predict -> UI Tailwin
 
 | File | Vai trò | File liên quan |
 |---|---|---|
-| `run_web.py` | Entry: khởi động Flask thread + tunnel, in link public | app.py |
+| `run_web.py` | Entry: khởi động Flask thread + tunnel, parse + in link public | app.py |
 | `app.py` | Flask app: /, /api/model-info, /api/train, /api/train-status, /api/predict | templates/, scripts/finetune.py, scripts/preprocess.py |
 | `templates/index.html` | UI Tailwind CDN: 3 card, JS fetch API | app.py |
 | `requirements.txt` | Deps: flask, cloudflared, transformers, torch, sklearn, pandas | - |
@@ -43,7 +43,7 @@ UIT-VSFC -> Fine-tune PhoBERT   ->              Flask /api/predict -> UI Tailwin
 |---|---|---|
 | `run_pipeline.py` | Entry: orchestrator toàn bộ thực nghiệm | baseline, finetune, evaluate |
 | `demo_inference.py` | Demo "Sản phẩm rất tệ!" + 5 câu mẫu | finetune.py |
-| `config.py` | Config + HF_TOKEN + hf_login_if_needed() | toàn bộ |
+| `config.py` | Config + HF_TOKEN (env) + hf_login_if_needed() | toàn bộ |
 | `preprocess.py` | Pipeline dữ liệu | download_uit_vsfc, normalize_text, clean_dataframe, prepare_dataset |
 | `baseline.py` | Thực nghiệm 1 | run_baseline: TF-IDF + LogisticRegression |
 | `finetune.py` | Thực nghiệm 3 | SentimentDataset, fine_tune, load_sentiment_model, predict_sentiment |
