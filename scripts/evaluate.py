@@ -175,6 +175,72 @@ def save_metrics_json(metrics: dict, name: str) -> str:
     return str(path)
 
 
+def save_learning_curve(
+    trainer,
+    name: str = "learning_curve",
+    title: str = "Learning Curve - PhoBERT-base-v2 fine-tuned",
+) -> str:
+    """
+    Vẽ biểu đồ hội tụ từ log_history của Trainer: train loss (trục trái)
+    + eval F1-macro theo epoch (trục phải).
+
+    Logic:
+      - trainer trả về từ fine_tune() (dùng chung pipeline lẫn web-train)
+      - Duyệt log_history: entry có "loss" -> train loss theo step;
+        entry có "eval_f1_macro" -> F1 theo epoch
+      - Không có dữ liệu -> trả "" (không tạo file rỗng)
+    """
+    _ensure_dirs()
+    history = getattr(getattr(trainer, "state", None), "log_history", []) or []
+
+    steps: list[float] = []
+    train_loss: list[float] = []
+    eval_epochs: list[float] = []
+    eval_f1: list[float] = []
+    for entry in history:
+        if "loss" in entry and entry.get("step") is not None:
+            steps.append(entry["step"])
+            train_loss.append(float(entry["loss"]))
+        if "eval_f1_macro" in entry:
+            eval_epochs.append(float(entry.get("epoch", len(eval_epochs) + 1)))
+            eval_f1.append(float(entry["eval_f1_macro"]))
+
+    if not steps and not eval_epochs:
+        print("[figure] Khong co log_history - bo qua learning curve")
+        return ""
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    if steps:
+        ax.plot(steps, train_loss, label="Train loss", color="#38BDF8", lw=1.8)
+        ax.set_xlabel("Step")
+        ax.set_ylabel("Loss", color="#38BDF8")
+        ax.tick_params(axis="y", labelcolor="#38BDF8")
+    if eval_epochs:
+        ax2 = ax.twinx()
+        ax2.plot(
+            eval_epochs, eval_f1, label="Eval F1 (macro)",
+            color="#22C55E", marker="o", lw=1.8,
+        )
+        ax2.set_ylabel("F1 macro", color="#22C55E")
+        ax2.tick_params(axis="y", labelcolor="#22C55E")
+
+    ax.set_title(title)
+    handles, labels = ax.get_legend_handles_labels()
+    if eval_epochs:
+        h2, l2 = ax.twinx().get_legend_handles_labels()
+        handles += h2
+        labels += l2
+    ax.legend(handles, labels, loc="best")
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+
+    path = FIGURE_DIR / f"{name}.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"[figure] Đã lưu: {path}")
+    return str(path)
+
+
 def compare_models(all_metrics: list[dict], path: str | Path | None = None) -> str:
     """
     Tạo bảng so sánh các mô hình -> lưu JSON + Markdown.

@@ -17,8 +17,9 @@ import time
 from collections import deque
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 
 # Thư mục gốc repo (webapp/ nằm ngay trong repo nên lấy cha của webapp/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +30,7 @@ from scripts.config import (  # noqa: E402
     BATCH_SIZE,
     BEST_MODEL_DIR,
     DATA_DIR,
+    FIGURE_DIR,
     LABEL_NAMES_EN,
     LABEL_NAMES_VI,
     LABEL_TO_ID,
@@ -91,7 +93,9 @@ class LogCaptureCallback(TrainerCallback):
         if not entry:
             return
         epoch = entry.get("epoch")
-        parts = [f"epoch {epoch:.2f}"]
+        # Phòng trường hợp log entry thiếu key "epoch" -> không format
+        # (None:.2f sẽ TypeError làm chết Trainer giữa chừng)
+        parts = [f"epoch {epoch:.2f}"] if epoch is not None else []
         for key in ("loss", "learning_rate", "eval_accuracy", "eval_f1_macro"):
             if key in entry and entry[key] is not None:
                 parts.append(f"{key}={entry[key]:.4f}" if isinstance(entry[key], float) else f"{key}={entry[key]}")
@@ -269,6 +273,71 @@ def train_config():
     )
 
 
+# Cache tokenizer + thống kê token (lazy, tính 1 lần) - tránh tải lại mỗi poll
+_TOKENIZER_CACHE = None
+_TOKEN_STATS_CACHE = None
+
+
+def _tokenization_info() -> dict | None:
+    """
+    Thông tin Bước 4 (Tokenization) cho web: tokenizer PhoBERT, vocab size,
+    thống kê token trên 300 câu mẫu + 1 ví dụ text -> tokens -> input_ids/mask.
+
+    Logic:
+      - Tải AutoTokenizer của đúng model dùng fine-tune (phobert-base-v2)
+      - Chỉ tokenize 300 câu mẫu để API không bị treo; kết quả cache
+      - Lỗi tải tokenizer -> trả None (web hiển thị ghi chú, không vỡ)
+    """
+    global _TOKENIZER_CACHE, _TOKEN_STATS_CACHE
+    if not (PROCESSED_DIR / "train.csv").exists():
+        return None
+    if _TOKENIZER_CACHE is None:
+        try:
+            from transformers import AutoTokenizer
+
+            _TOKENIZER_CACHE = AutoTokenizer.from_pretrained(TRANSFORMER_MODEL)
+        except Exception as exc:  # noqa: BLE001 - không có mạng/model -> bỏ qua
+            print(f"[data-info][warn] Khong tai duoc tokenizer: {exc}")
+            return None
+    tokenizer = _TOKENIZER_CACHE
+
+    if _TOKEN_STATS_CACHE is None:
+        df = pd.read_csv(PROCESSED_DIR / "train.csv").head(300)
+        lengths = [len(tokenizer.encode(str(t))) for t in df["text_clean"]]
+        _TOKEN_STATS_CACHE = {
+            "mean": round(float(np.mean(lengths)), 2),
+            "median": int(np.median(lengths)),
+            "max": int(np.max(lengths)),
+            "n_samples": len(lengths),
+        }
+
+    raw_text = str(pd.read_csv(DATA_DIR / "uit_vsfc_train.csv")["text"].iloc[0])
+    enc = tokenizer(raw_text)
+    input_ids = enc["input_ids"]
+    return {
+        "tokenizer": TRANSFORMER_MODEL,
+        "vocab_size": int(getattr(tokenizer, "vocab_size", 0) or len(tokenizer)),
+        "model_max_len": MAX_LEN,
+        "steps": [
+            "Text → Tokens (BPE của PhoBERT)",
+            "Thêm special tokens: [CLS] ... [SEP]",
+            "Token → input_ids (số nguyên)",
+            "Tạo attention_mask (1 = token thật, 0 = padding)",
+        ],
+        "stats": _TOKEN_STATS_CACHE,
+        "examples": [
+            {
+                "text": raw_text,
+                "tokens": tokenizer.convert_ids_to_tokens(input_ids),
+                "input_ids": input_ids,
+                "attention_mask": enc.get(
+                    "attention_mask", [1] * len(input_ids)
+                ),
+            }
+        ],
+    }
+
+
 @app.get("/api/data-info")
 def data_info():
     """
@@ -329,6 +398,16 @@ def data_info():
             for label_id in (0, 1, 2)
         ]
 
+    # Bước 5 - Chia dữ liệu: % mỗi split so với tổng sau làm sạch
+    total_clean = sum(stats[s]["so_dong_con_lai"] for s in stats) or 1
+    split = {
+        s: {
+            "rows": stats[s]["so_dong_con_lai"],
+            "pct": round(stats[s]["so_dong_con_lai"] / total_clean * 100, 1),
+        }
+        for s in ("train", "valid", "test")
+    }
+
     return jsonify(
         {
             "exists": True,
@@ -337,6 +416,8 @@ def data_info():
             "samples": samples,
             "mapping": mapping,
             "distribution": distribution,
+            "split": split,
+            "tokenization": _tokenization_info(),
             "preprocess_steps": [
                 "Sửa lỗi encoding (latin-1 -> utf-8)",
                 "Gộp nhiều khoảng trắng/tab/xuống dòng thành 1",
@@ -347,6 +428,40 @@ def data_info():
             ],
         }
     )
+
+
+@app.get("/figures/<path:filename>")
+def figure_file(filename: str):
+    """
+    Serve ảnh PNG từ results/figures cho web (learning curve, CM, PR curve).
+
+    Bảo mật: resolve() tuyệt đối rồi kiểm tra nằm trong FIGURE_DIR -
+    chặn path traversal (../).
+    """
+    base = FIGURE_DIR.resolve()
+    target = (base / filename).resolve()
+    if not target.is_file() or base not in target.parents:
+        return jsonify({"error": "Khong tim thay figure"}), 404
+    return send_file(str(target), mimetype="image/png")
+
+
+@app.get("/api/figures")
+def figures():
+    """Danh sách biểu đồ PNG đã sinh (results/figures/*.png)."""
+    if not FIGURE_DIR.exists():
+        return jsonify({"figures": []})
+    files = sorted(p.name for p in FIGURE_DIR.glob("*.png"))
+    return jsonify({"figures": files})
+
+
+@app.get("/api/compare")
+def compare():
+    """
+    Bảng so sánh 3 mô hình từ results/compare_table.json (sinh bởi
+    scripts/run_pipeline.py). Chưa có -> exists=false, web hiển thị ghi chú.
+    """
+    data = _read_json(RESULTS_DIR / "compare_table.json")
+    return jsonify({"exists": data is not None, "rows": data or []})
 
 
 @app.post("/api/predict")
@@ -407,6 +522,7 @@ def train():
                 evaluate_transformer,
                 print_metrics_table,
                 save_confusion_matrix,
+                save_learning_curve,
                 save_metrics_json,
                 save_pr_curve,
             )
@@ -417,7 +533,7 @@ def train():
             with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
                 splits, _ = prepare_dataset()
                 _append_log("[phase] Tien xu ly du lieu xong - tokenize & fine-tune...", "EPOCH")
-                fine_tune(
+                trainer = fine_tune(
                     splits,
                     num_epochs=params["epochs"],
                     learning_rate=params["learning_rate"],
@@ -428,6 +544,8 @@ def train():
                     seed=params["seed"],
                     callbacks=[TrainProgressCallback(), LogCaptureCallback()],
                 )
+                # Biểu đồ hội tụ (train loss + eval F1 theo epoch)
+                save_learning_curve(trainer)
                 # Đánh giá ngay trên test -> sinh metrics JSON + CM + PR curve
                 # (giống run_pipeline.py, để KPI/model-info/tab Model hiển thị đúng)
                 _append_log("[phase] Danh gia tren tap test...", "EPOCH")

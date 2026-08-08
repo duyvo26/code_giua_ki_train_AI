@@ -96,14 +96,18 @@ def _run_finetune_and_eval(splits: dict, skip_finetune: bool) -> dict | None:
         evaluate_transformer,
         print_metrics_table,
         save_confusion_matrix,
+        save_learning_curve,
         save_metrics_json,
         save_pr_curve,
     )
     from scripts.finetune import fine_tune, load_sentiment_model
 
     print("\n=== Thuc nghiem 3: Fine-tuning PhoBERT-base-v2 ===")
+    trainer = None
     if not skip_finetune:
-        fine_tune(splits)
+        trainer = fine_tune(splits)
+        # Biểu đồ hội tụ (loss + F1 theo epoch) -> results/figures/learning_curve.png
+        save_learning_curve(trainer)
     elif not (BEST_MODEL_DIR / "config.json").exists():
         print("[warn] --skip-finetune nhung chua co models/best_model."
               " Bo qua thuc nghiem 3.")
