@@ -324,7 +324,7 @@ let lastSavedSignature = "";
 
 // Version content script - popup kiem tra de tu inject lai khi script cu
 // con song trong tab da mo (sau khi reload extension ma chua F5 trang)
-const EXT_VERSION = 13;
+const EXT_VERSION = 14;
 
 /**
  * Doc so bai toi da tu chrome.storage.local va cap nhat bien postLimit.
@@ -598,6 +598,7 @@ async function sendPostsToWeb(posts) {
       body: JSON.stringify({
         posts,
         threshold: parseInt(threshold, 10) || 70,
+        collected_at: Date.now(),
       }),
     });
     const data = await resp.json().catch(() => ({}));

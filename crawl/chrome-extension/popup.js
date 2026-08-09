@@ -15,7 +15,7 @@ const WEB_URL_KEY = "fb_web_url";
 const API_KEY_KEY = "fb_api_key";
 const NEG_THRESHOLD_KEY = "fb_neg_threshold";
 // Phai khop EXT_VERSION trong content.js - neu cu hon thi re-inject lai
-const EXPECTED_EXT_VERSION = 13;
+const EXPECTED_EXT_VERSION = 14;
 
 const buttonDownload = document.getElementById("download");
 const buttonClear = document.getElementById("clearPosts");
@@ -231,6 +231,7 @@ async function sendToWeb(posts) {
     body: JSON.stringify({
       posts,
       threshold: parseInt(negThresholdInput.value, 10) || 70,
+      collected_at: Date.now(),
     }),
   });
   const data = await resp.json().catch(() => ({}));

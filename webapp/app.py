@@ -946,32 +946,115 @@ def _find_negative_posts(analysis: dict, threshold: float) -> list[dict]:
     return negative_posts
 
 
-def _build_notify_message(negative_posts: list[dict]) -> str:
+def _find_negative_post_contents(analysis: dict) -> list[dict]:
     """
-    Dựng nội dung tin cảnh báo từ danh sách bài có bình luận tiêu cực.
+    Lọc bài viết co NOI DUNG tieu cuc (post_negative = True).
 
     Logic:
-      - Moi bai 1 dong: so thu tu + url + so binh luan tieu cuc
-      - Kem danh sach binh luan tieu cuc (text 150 ky tu + do tin cay %)
+      - post_negative da duoc tinh san luc phan tich (cung nguong)
+      - Day la CANH BAO RIENG cho bai viet - khac voi canh bao binh luan
 
     Args:
-        negative_posts (list[dict]): Ket qua _find_negative_posts
+        analysis (dict): Ket qua fb_analysis.json
 
     Returns:
-        str: Noi dung tin nhan canh bao
+        list[dict]: Cac bai viet tieu cuc ({post: post})
     """
-    lines = []
-    for item in negative_posts:
-        post = item["post"]
-        neg_comments = item["neg_comments"]
-        lines.append(
-            f"- Bai {post['index']} ({post['url']}): {len(neg_comments)} binh luan tieu cuc\n"
-            + "\n".join(
-                f"   + {c['text'][:150]} (Do tin cay: {c['confidence']:.0%})"
-                for c in neg_comments
+    return [
+        {"post": post}
+        for post in analysis.get("posts", [])
+        if post.get("post_negative")
+    ]
+
+
+def _fmt_collected_time(collected_at, fallback_ts: str = "") -> str:
+    """
+    Định dạng mốc thời gian LẤY DỮ LIỆU để đưa vào tin nhắn bot.
+
+    Logic:
+      - collected_at từ extension: epoch ms (Date.now()) -> epoch s nếu > 1e12
+      - Lỗi/không có -> dùng fallback_ts (thời gian phân tích trên web)
+
+    Args:
+        collected_at: epoch (ms hoặc s) hoặc None
+        fallback_ts (str): Thời gian phân tích dạng text (vd từ fb_analysis.json)
+
+    Returns:
+        str: "%Y-%m-%d %H:%M:%S" hoặc chuỗi rỗng
+    """
+    if collected_at:
+        try:
+            sec = float(collected_at)
+            if sec > 1e12:  # epoch ms -> s
+                sec /= 1000
+            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(sec))
+        except (TypeError, ValueError, OSError):
+            pass
+    return fallback_ts or ""
+
+
+def _build_notify_message(
+    negative_posts: list[dict],
+    negative_post_items: list[dict],
+    collected_at=None,
+    fallback_ts: str = "",
+) -> str:
+    """
+    Dựng nội dung tin cảnh báo (1 nhom duy nhat cho 1 lan cao).
+
+    Logic:
+      - Nhom 1 - BINH LUAN tieu cuc: moi bai 1 dong kem cac binh luan tieu cuc
+      - Nhom 2 - BAI VIET co noi dung tieu cuc (post_negative): noi dung trich 150 ky tu
+      - Dong dau moi nhom: MOC THOI GIAN LAY DU LIEU (tu extension hoac thoi gian phan tich)
+      - Emoji o dau moi item: 🚨 tieu de, 🕒 moc thoi gian, 📌 bai viet,
+        💬 binh luan, 📝 noi dung bai, 😡/😊/😐 cam xuc
+      - Tra ve message rong neu khong co loai nao
+
+    Args:
+        negative_posts (list[dict]): Ket qua _find_negative_posts (binh luan)
+        negative_post_items (list[dict]): Ket qua _find_negative_post_contents (bai viet)
+        collected_at: Moc thoi gian extension lay du lieu (epoch ms/s hoac None)
+        fallback_ts (str): Thoi gian phan tich (dung khi khong co collected_at)
+
+    Returns:
+        str: Noi dung tin nhan canh bao (1 nhom) hoac "" neu khong co gi
+    """
+    collected_time = _fmt_collected_time(collected_at, fallback_ts)
+    time_line = f"🕒 Thoi gian lay du lieu: {collected_time}" if collected_time else ""
+
+    sections: list[str] = []
+
+    # Nhom 1: binh luan tieu cuc
+    if negative_posts:
+        lines = ["🚨 CANH BAO BINH LUAN TIEU CUC:"]
+        if time_line:
+            lines.append(time_line)
+        for item in negative_posts:
+            post = item["post"]
+            neg_comments = item["neg_comments"]
+            lines.append(f"📌 Bai {post['index']} ({post['url']}): {len(neg_comments)} binh luan tieu cuc")
+            for c in neg_comments:
+                lines.append(f"   💬 {c['text'][:150]} (Do tin cay: {c['confidence']:.0%})")
+        sections.append("\n".join(lines))
+
+    # Nhom 2: bai viet co noi dung tieu cuc
+    if negative_post_items:
+        lines = ["🚨 CANH BAO BAI VIET TIEU CUC:"]
+        if time_line:
+            lines.append(time_line)
+        for item in negative_post_items:
+            post = item["post"]
+            sentiment_vi = post.get("post_sentiment_vi") or "Tieu cuc"
+            confidence = post.get("post_confidence") or 0
+            lines.append(
+                f"📌 Bai {post['index']} ({post['url']}): 😡 {sentiment_vi} {confidence * 100:.0f}%"
             )
-        )
-    return "CANH BAO: Co binh luan TIEU CUC tren bai viet Facebook:\n" + "\n".join(lines)
+            text = (post.get("text") or "").strip()
+            if text:
+                lines.append(f"   📝 {text[:150]}")
+        sections.append("\n".join(lines))
+
+    return "\n\n".join(sections)
 
 
 def _send_alert_to_bots(analysis: dict, threshold: float) -> list[str]:
@@ -979,10 +1062,11 @@ def _send_alert_to_bots(analysis: dict, threshold: float) -> list[str]:
     Tự gửi cảnh báo qua các bot ĐÃ CẤU HÌNH (token + chat_id).
 
     Logic:
+      - 1 lan cao = 1 TIN NHOM: gom 2 phan (binh luan tieu cuc + bai viet tieu cuc)
       - Kiem tra lan luot telegram + zalo qua load_config()
-      - Bot nao co token + chat_id thi gui tin canh bao (chunk 4000 ky tu)
+      - Bot nao co token + chat_id thi gui tin (chunk 4000 ky tu)
       - Bot chua cau hinh -> bo qua (log ghi ro)
-      - Khong co bai tieu cuc -> khong gui
+      - Khong co loai nao tieu cuc -> khong gui
 
     Args:
         analysis (dict): Ket qua fb_analysis.json
@@ -994,11 +1078,17 @@ def _send_alert_to_bots(analysis: dict, threshold: float) -> list[str]:
     from webapp.bots.common import chunk_text
 
     negative_posts = _find_negative_posts(analysis, threshold)
-    if not negative_posts:
-        _append_log("Khong co bai nao co binh luan tieu cuc - khong can gui bot", "INFO")
+    negative_post_items = _find_negative_post_contents(analysis)
+    message = _build_notify_message(
+        negative_posts,
+        negative_post_items,
+        analysis.get("collected_at"),
+        analysis.get("ts"),
+    )
+    if not message:
+        _append_log("Khong co binh luan/bai viet tieu cuc - khong can gui bot", "INFO")
         return []
 
-    message = _build_notify_message(negative_posts)
     cfg = load_config()
     sent_to: list[str] = []
     for bot_type, bot in _BOT_INSTANCES.items():
@@ -1023,7 +1113,14 @@ def _send_alert_to_bots(analysis: dict, threshold: float) -> list[str]:
     return sent_to
 
 
-def _run_fb_analyze(posts, model, tokenizer, threshold: float, source: str = "web") -> None:
+def _run_fb_analyze(
+    posts,
+    model,
+    tokenizer,
+    threshold: float,
+    source: str = "web",
+    collected_at=None,
+) -> None:
     """
     Thread nền: phân tích từng bình luận, lưu fb_analysis.json + log + lịch sử.
 
@@ -1036,6 +1133,7 @@ def _run_fb_analyze(posts, model, tokenizer, threshold: float, source: str = "we
     Args:
         source (str): "web" = phân tích thủ công trên tab FB,
             "extension" = data từ extension gửi về
+        collected_at: Mốc thời gian extension lấy dữ liệu (epoch ms/s hoặc None)
     """
     _append_log(f"=== BAT DAU PHAN TICH BINH LUAN FACEBOOK (nguong {threshold:.0f}%) ===", "INFO")
     analyzed_posts = []
@@ -1102,6 +1200,8 @@ def _run_fb_analyze(posts, model, tokenizer, threshold: float, source: str = "we
         "total_negative": total_negative,
         "total_post_negative": total_post_negative,
         "threshold": threshold,
+        "collected_at": collected_at,
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         "done": True,
     }
     with contextlib.suppress(Exception):
@@ -1113,13 +1213,14 @@ def _run_fb_analyze(posts, model, tokenizer, threshold: float, source: str = "we
     with contextlib.suppress(Exception):
         append_history(
             {
-                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "ts": payload["ts"],
                 "source": source,
                 "posts": payload["total_posts"],
                 "comments": payload["total_comments"],
                 "negative": total_negative,
                 "post_negative": total_post_negative,
                 "threshold": threshold,
+                "collected_at": collected_at,
                 "sent_to": [],
                 "urls": [p.get("url", "") for p in posts if p.get("url")][:10],
             }
@@ -1155,10 +1256,17 @@ def fb_posts_notify():
         data.get("threshold", analysis.get("threshold"))
     )
     negative_posts = _find_negative_posts(analysis, threshold)
-    if not negative_posts:
+    negative_post_items = _find_negative_post_contents(analysis)
+    message = _build_notify_message(
+        negative_posts,
+        negative_post_items,
+        analysis.get("collected_at"),
+        analysis.get("ts"),
+    )
+    if not message:
         return jsonify({
             "ok": True,
-            "message": f"Khong co bai nao co binh luan tieu cuc (nguong {threshold:.0f}%) - khong can gui",
+            "message": f"Khong co binh luan/bai viet tieu cuc (nguong {threshold:.0f}%) - khong can gui",
         })
 
     bot = _resolve_bot(bot_type)
@@ -1175,17 +1283,23 @@ def fb_posts_notify():
 
     from webapp.bots.common import chunk_text
 
-    message = _build_notify_message(negative_posts)
     sent = False
     for chunk in chunk_text(message, max_chars=4000):
         sent = bot.send(chat_id, chunk) or sent
         time.sleep(0.3)
     if not sent:
         return jsonify({"ok": False, "error": f"Gui tin nhan that bai qua {bot_type} - xem log bot"})
-    _append_log(f"Da gui canh bao {len(negative_posts)} bai tieu cuc (nguong {threshold:.0f}%) qua bot {bot_type}", "INFO")
+    _append_log(
+        f"Da gui canh bao {len(negative_posts)} bai tieu cuc (binh luan) + "
+        f"{len(negative_post_items)} bai tieu cuc (noi dung) qua bot {bot_type}",
+        "INFO",
+    )
     return jsonify({
         "ok": True,
-        "message": f"Da gui canh bao {len(negative_posts)} bai (nguong {threshold:.0f}%) qua {bot_type}",
+        "message": (
+            f"Da gui canh bao {len(negative_posts)} bai (binh luan) + "
+            f"{len(negative_post_items)} bai (noi dung) qua {bot_type}"
+        ),
     })
 
 
@@ -1301,10 +1415,11 @@ def extension_analyze():
         return jsonify({"error": f"Chua co model: {exc}. Hay bam Train truoc."}), 500
 
     threshold = _validate_negative_threshold(data.get("threshold"))
+    collected_at = data.get("collected_at")
 
     analyze_thread = threading.Thread(
         target=_run_extension_analyze,
-        args=(posts, model, tokenizer, threshold),
+        args=(posts, model, tokenizer, threshold, collected_at),
         daemon=True,
     )
     analyze_thread.start()
@@ -1323,19 +1438,22 @@ def extension_analyze():
     )
 
 
-def _run_extension_analyze(posts, model, tokenizer, threshold: float) -> None:
+def _run_extension_analyze(posts, model, tokenizer, threshold: float, collected_at=None) -> None:
     """
     Thread nền của /api/extension/analyze: phân tích -> lưu -> tự gửi bot.
 
     Logic:
-      - B1: _run_fb_analyze() phân tích từng bình luận, lưu fb_analysis.json
+      - B1: _run_fb_analyze() phân tích (bài + bình luận), lưu fb_analysis.json
       - B2: đọc lại kết quả, gọi _send_alert_to_bots() tới mọi bot đã cấu hình
+
+    Args:
+        collected_at: Mốc thời gian extension lấy dữ liệu (epoch ms/s hoặc None)
     """
     _append_log(
         f"=== EXTENSION: nhan {len(posts)} bai, dang phan tich (nguong {threshold:.0f}%)... ===",
         "INFO",
     )
-    _run_fb_analyze(posts, model, tokenizer, threshold, source="extension")
+    _run_fb_analyze(posts, model, tokenizer, threshold, source="extension", collected_at=collected_at)
     try:
         analysis_file = RESULTS_DIR / "fb_analysis.json"
         if analysis_file.exists():
