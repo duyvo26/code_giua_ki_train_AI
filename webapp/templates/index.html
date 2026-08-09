@@ -370,6 +370,12 @@ NOI DUNG:
 1. Cua hang that te, khong nen mua'
                           class="w-full bg-slate-900 border border-border rounded-md px-3 py-2 font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-500 resize-y"></textarea>
                 <div class="flex flex-wrap items-center gap-3">
+                    <div>
+                        <label for="fb-threshold" class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Ngưỡng tiêu cực</label>
+                        <input id="fb-threshold" type="number" min="1" max="100" value="70"
+                               class="w-24 bg-slate-900 border border-border rounded-md px-2.5 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <span class="text-[11px] text-slate-500">%</span>
+                    </div>
                     <input id="fb-file" type="file" accept=".txt,.json,text/plain,application/json"
                            class="text-[11px] text-slate-400 file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-muted file:text-slate-200 file:text-[11px] file:font-medium file:cursor-pointer hover:file:bg-slate-700/70 cursor-pointer">
                     <button id="fb-parse" class="px-4 py-2 rounded-md bg-muted hover:bg-slate-700/70 text-xs font-medium transition-colors duration-200 cursor-pointer">Parse thử</button>
@@ -1238,10 +1244,17 @@ NOI DUNG:
 
         // ---------- Phân tích bình luận Facebook ----------
         let fbAnalysis = null;
+        const FB_THRESHOLD_KEY = "fb_neg_threshold";
         const fbEl = (id) => document.getElementById(id);
         const fbStatus = (msg, color = "text-slate-500") => {
             fbEl("fb-status").textContent = msg;
             fbEl("fb-status").className = "text-[11px] " + color;
+        };
+        const fbThreshold = () => {
+            const v = parseInt(fbEl("fb-threshold").value, 10);
+            if (!v || v < 1) { fbEl("fb-threshold").value = 70; return 70; }
+            if (v > 100) { fbEl("fb-threshold").value = 100; return 100; }
+            return v;
         };
 
         function readFbInput() {
@@ -1272,6 +1285,8 @@ NOI DUNG:
             fbEl("fb-sum-negative").textContent = negative;
             fbEl("fb-sum-status").textContent = "Hoàn tất";
             fbEl("fb-sum-status").className = "text-lg font-bold " + (negative > 0 ? "text-red-400" : "text-emerald-400");
+            const t = fbAnalysis.threshold || 70;
+            fbEl("fb-status").textContent = `Phân tích xong: ${comments} bình luận, ${negative} tiêu cực (ngưỡng ${t}%).`;
         }
 
         function renderFbResults() {
@@ -1325,12 +1340,14 @@ NOI DUNG:
         async function fbAnalyze() {
             const text = await readFbInput();
             if (!text.trim()) { fbStatus("Chưa có nội dung - dán text hoặc chọn file trước.", "text-amber-400"); return; }
+            const threshold = fbThreshold();
+            localStorage.setItem(FB_THRESHOLD_KEY, String(threshold));
             fbEl("fb-summary").classList.add("hidden");
             fbEl("fb-results").classList.add("hidden");
-            fbStatus("Đang phân tích cảm xúc bình luận (có thể mất 30s-2 phút)...", "text-amber-400");
+            fbStatus(`Đang phân tích cảm xúc bình luận (ngưỡng tiêu cực ${threshold}%, có thể mất 30s-2 phút)...`, "text-amber-400");
             fbAnalysis = null;
             try {
-                await fbFetch("/api/fb-posts/analyze", { text });
+                await fbFetch("/api/fb-posts/analyze", { text, threshold });
                 fbStatus("Đã bắt đầu phân tích - đang chờ kết quả...", "text-sky-400");
                 pollFbAnalysis();
             } catch (err) {
@@ -1360,9 +1377,10 @@ NOI DUNG:
         async function fbNotify() {
             if (!fbAnalysis) { fbStatus("Chưa có kết quả phân tích - bấm Phân tích trước.", "text-amber-400"); return; }
             const type = fbEl("fb-bot-type").value;
-            fbStatus("Đang gửi cảnh báo qua bot " + type + "...", "text-sky-400");
+            const threshold = fbThreshold();
+            fbStatus(`Đang gửi cảnh báo qua bot ${type} (ngưỡng ${threshold}%)...`, "text-sky-400");
             try {
-                const data = await fbFetch("/api/fb-posts/notify", { type });
+                const data = await fbFetch("/api/fb-posts/notify", { type, threshold });
                 fbStatus(data.message, data.ok ? "text-emerald-400" : "text-red-400");
             } catch (err) {
                 fbStatus("Lỗi gửi cảnh báo: " + err.message, "text-red-400");
@@ -1407,6 +1425,8 @@ NOI DUNG:
         document.getElementById("fb-parse").addEventListener("click", fbParse);
         document.getElementById("fb-analyze").addEventListener("click", fbAnalyze);
         document.getElementById("fb-notify").addEventListener("click", fbNotify);
+        const savedThreshold = localStorage.getItem(FB_THRESHOLD_KEY);
+        if (savedThreshold) fbEl("fb-threshold").value = savedThreshold;
 
         loadModelInfo();
         loadTrainConfig();

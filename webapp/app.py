@@ -812,8 +812,7 @@ def fb_posts_analyze():
     Logic:
       - Dùng dữ liệu đã parse (truyền {text} lại hoặc đọc fb_posts.json)
       - Nếu thiếu model -> trả lỗi hướng dẫn train
-      - Cache model (giống bots/common) để chạy nhanh nhiều lần
-      - Bình luận tiêu cực = Negative prob >= 0.5 (phân loại mặc định)
+      - Bình luận tiêu cực = Negative prob >= threshold (mặc định 70%)
       - Lưu kết quả results/fb_analysis.json
     """
     data = request.get_json(silent=True) or {}
@@ -839,18 +838,38 @@ def fb_posts_analyze():
     except OSError as exc:
         return jsonify({"error": f"Chua co model: {exc}. Hay bam Train truoc."}), 500
 
+    threshold = _validate_negative_threshold(data.get("threshold"))
+
     analyze_thread = threading.Thread(
         target=_run_fb_analyze,
-        args=(posts, model, tokenizer),
+        args=(posts, model, tokenizer, threshold),
         daemon=True,
     )
     analyze_thread.start()
-    return jsonify({"ok": True, "message": "Dang phan tich..."})
+    return jsonify({"ok": True, "message": f"Dang phan tich (nguong tieu cuc {threshold}%)..."})
 
 
-def _run_fb_analyze(posts, model, tokenizer) -> None:
+def _validate_negative_threshold(value) -> float:
+    """
+    Chuyển giá trị ngưỡng tiêu cực về hợp lệ: số trong [0, 100], mặc định 70.
+    Chấp nhận cả dạng % (70) lẫn tỉ lệ (0.7).
+    """
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return 70.0
+    if num <= 1.0:
+        num = num * 100  # dạng tỉ lệ 0.7 -> 70%
+    if num < 0:
+        return 0.0
+    if num > 100:
+        return 100.0
+    return num
+
+
+def _run_fb_analyze(posts, model, tokenizer, threshold: float) -> None:
     """Thread nền: phân tích từng bình luận, lưu fb_analysis.json + log."""
-    _append_log("=== BAT DAU PHAN TICH BINH LUAN FACEBOOK ===", "INFO")
+    _append_log(f"=== BAT DAU PHAN TICH BINH LUAN FACEBOOK (nguong {threshold:.0f}%) ===", "INFO")
     analyzed_posts = []
     total_negative = 0
     for post in posts:
@@ -864,7 +883,7 @@ def _run_fb_analyze(posts, model, tokenizer) -> None:
             except Exception as exc:
                 _append_log(f"Loi phan tich binh luan: {exc}", "ERROR")
                 continue
-            negative = result["probabilities"]["Negative"] >= 0.5
+            negative = result["probabilities"]["Negative"] >= threshold / 100
             if negative:
                 total_negative += 1
             analyzed_comments.append(
@@ -891,6 +910,7 @@ def _run_fb_analyze(posts, model, tokenizer) -> None:
         "total_posts": len(analyzed_posts),
         "total_comments": sum(len(p["comments"]) for p in analyzed_posts),
         "total_negative": total_negative,
+        "threshold": threshold,
         "done": True,
     }
     with contextlib.suppress(Exception):
@@ -912,7 +932,9 @@ def fb_posts_notify():
 
     Logic:
       - Đọc kết quả fb_analysis.json (phải analyze trước)
-      - Lọc bài có negative_count > 0, soạn tin nhắn -> bot.send()
+      - Ngưỡng tiêu cực: lấy từ body nếu có, ngược lại dùng threshold
+        đã lưu trong file lúc analyze (mặc định 70%)
+      - Lọc bài có negative_count > 0 theo ngưỡng, soạn tin -> bot.send()
       - Thiếu token/chat_id -> báo lỗi rõ cho UI
     """
     data = request.get_json(silent=True) or {}
@@ -923,9 +945,23 @@ def fb_posts_notify():
         return jsonify({"error": "Chua co ket qua phan tich - hay bam Phan tich truoc"}), 400
     analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
 
-    negative_posts = [p for p in analysis.get("posts", []) if p.get("negative_count", 0) > 0]
+    threshold = _validate_negative_threshold(
+        data.get("threshold", analysis.get("threshold"))
+    )
+    negative_posts = []
+    for post in analysis.get("posts", []):
+        neg_comments = [
+            c
+            for c in post.get("comments", [])
+            if (c.get("probabilities") or {}).get("Negative", 0) >= threshold / 100
+        ]
+        if neg_comments:
+            negative_posts.append({"post": post, "neg_comments": neg_comments})
     if not negative_posts:
-        return jsonify({"ok": True, "message": "Khong co bai nao co binh luan tieu cuc - khong can gui"})
+        return jsonify({
+            "ok": True,
+            "message": f"Khong co bai nao co binh luan tieu cuc (nguong {threshold:.0f}%) - khong can gui",
+        })
 
     bot = _resolve_bot(bot_type)
     if bot is None:
@@ -942,8 +978,9 @@ def fb_posts_notify():
     from webapp.bots.common import chunk_text
 
     lines = []
-    for post in negative_posts:
-        neg_comments = [c for c in post["comments"] if c.get("negative")]
+    for item in negative_posts:
+        post = item["post"]
+        neg_comments = item["neg_comments"]
         lines.append(
             f"- Bai {post['index']} ({post['url']}): {len(neg_comments)} binh luan tieu cuc\n"
             + "\n".join(
@@ -957,8 +994,11 @@ def fb_posts_notify():
         time.sleep(0.3)
     if not sent:
         return jsonify({"ok": False, "error": f"Gui tin nhan that bai qua {bot_type} - xem log bot"})
-    _append_log(f"Da gui canh bao {len(negative_posts)} bai tieu cuc qua bot {bot_type}", "INFO")
-    return jsonify({"ok": True, "message": f"Da gui canh bao {len(negative_posts)} bai qua {bot_type}"})
+    _append_log(f"Da gui canh bao {len(negative_posts)} bai tieu cuc (nguong {threshold:.0f}%) qua bot {bot_type}", "INFO")
+    return jsonify({
+        "ok": True,
+        "message": f"Da gui canh bao {len(negative_posts)} bai (nguong {threshold:.0f}%) qua {bot_type}",
+    })
 
 
 if __name__ == "__main__":
