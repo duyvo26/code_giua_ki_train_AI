@@ -1626,7 +1626,7 @@ NOI DUNG:
          *
          * Logic:
          *   - Lay tu bien fbAnalysis (da load xong); so tieu cuc do neu > 0
-         *   - Hien thong bao kem nguong da dung
+         *   - Hien thong bao kem nguong da dung va so BAI co noi dung tieu cuc
          *
          * @returns {void}
          */
@@ -1636,13 +1636,14 @@ NOI DUNG:
             const total = fbAnalysis.total_posts || 0;
             const comments = fbAnalysis.total_comments || 0;
             const negative = fbAnalysis.total_negative || 0;
+            const postNegative = fbAnalysis.total_post_negative || 0;
             fbEl("fb-sum-posts").textContent = total;
             fbEl("fb-sum-comments").textContent = comments;
             fbEl("fb-sum-negative").textContent = negative;
             fbEl("fb-sum-status").textContent = "Hoàn tất";
             fbEl("fb-sum-status").className = "text-lg font-bold " + (negative > 0 ? "text-red-400" : "text-emerald-400");
             const t = fbAnalysis.threshold || 70;
-            fbEl("fb-status").textContent = `Phân tích xong: ${comments} bình luận, ${negative} tiêu cực (ngưỡng ${t}%).`;
+            fbEl("fb-status").textContent = `Phân tích xong: ${comments} bình luận (${negative} tiêu cực), ${postNegative} bài có nội dung tiêu cực (ngưỡng ${t}%).`;
         }
 
         /**
@@ -1650,6 +1651,7 @@ NOI DUNG:
          *
          * Logic:
          *   - Moi bai 1 card: so thu tu, url (mo tab moi), noi dung trich 300 ky tu,
+         *     badge NOI DUNG BAI VIET (tieu cuc/trung tinh/tich cuc theo model),
          *     badge so binh luan tieu cuc
          *   - Moi binh luan: sentiment_vi + do tin cay + text; binh luan tieu cuc
          *     co nen do de nhan biet
@@ -1665,13 +1667,21 @@ NOI DUNG:
                 const card = document.createElement("div");
                 card.className = "bg-surface border border-border rounded-xl p-4";
                 const negBadge = negCount > 0
-                    ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-950/70 text-red-300 border border-red-900">${negCount} tiêu cực</span>`
+                    ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-950/70 text-red-300 border border-red-900">${negCount} bình luận tiêu cực</span>`
                     : `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-slate-400 border border-border">không tiêu cực</span>`;
+                const postBadge = post.post_sentiment
+                    ? `<span class="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${post.post_negative
+                        ? "bg-red-950/70 text-red-300 border-red-900"
+                        : post.post_sentiment_vi === "Tích cực"
+                            ? "bg-emerald-950/70 text-emerald-300 border-emerald-900"
+                            : "bg-muted text-slate-400 border-border"}">Bài viết: ${post.post_sentiment_vi} (${(post.post_confidence * 100).toFixed(0)}%)</span>`
+                    : "";
                 card.innerHTML = `
                     <div class="flex items-start justify-between gap-3 mb-2">
                         <div class="min-w-0">
                             <p class="text-[11px] text-slate-500">Bài ${post.index}</p>
                             <a href="${post.url}" target="_blank" class="text-sky-400 text-[11px] font-mono break-all hover:underline">${post.url}</a>
+                            ${postBadge}
                             ${post.text ? `<p class="mt-1 text-[12px] text-slate-300 whitespace-pre-wrap break-words">${post.text.slice(0, 300)}${post.text.length > 300 ? "…" : ""}</p>` : ""}
                         </div>
                         ${negBadge}
@@ -1935,7 +1945,8 @@ NOI DUNG:
                         <thead><tr class="text-left text-slate-500 border-b border-border">
                             <th class="py-2 pr-3">Thời gian</th><th class="pr-3">Nguồn</th>
                             <th class="pr-3 text-right">Bài</th><th class="pr-3 text-right">Bình luận</th>
-                            <th class="pr-3 text-right">Tiêu cực</th><th class="pr-3 text-right">Ngưỡng</th>
+                            <th class="pr-3 text-right">Tiêu cực</th><th class="pr-3 text-right">Bài tiêu cực</th>
+                            <th class="pr-3 text-right">Ngưỡng</th>
                             <th>Bot gửi</th>
                         </tr></thead>
                         <tbody>
@@ -1946,6 +1957,7 @@ NOI DUNG:
                                     <td class="py-2 pr-3 text-right text-slate-200">${e.posts}</td>
                                     <td class="py-2 pr-3 text-right text-slate-300">${e.comments}</td>
                                     <td class="py-2 pr-3 text-right font-semibold ${e.negative > 0 ? "text-red-400" : "text-emerald-400"}">${e.negative}</td>
+                                    <td class="py-2 pr-3 text-right font-semibold ${e.post_negative > 0 ? "text-red-400" : "text-emerald-400"}">${e.post_negative != null ? e.post_negative : "-"}</td>
                                     <td class="py-2 pr-3 text-right text-slate-400">${e.threshold != null ? e.threshold.toFixed(0) + "%" : "-"}</td>
                                     <td class="py-2 text-slate-300">${(e.sent_to || []).length ? e.sent_to.map(t => t === "telegram" ? "Telegram" : "Zalo").join(" + ") : '<span class="text-slate-500">-</span>'}</td>
                                 </tr>`).join("")}

@@ -1025,7 +1025,25 @@ def _run_fb_analyze(posts, model, tokenizer, threshold: float, source: str = "we
     _append_log(f"=== BAT DAU PHAN TICH BINH LUAN FACEBOOK (nguong {threshold:.0f}%) ===", "INFO")
     analyzed_posts = []
     total_negative = 0
+    total_post_negative = 0
     for post in posts:
+        # Phân tích NỘI DUNG BÀI VIẾT (text) - không chỉ bình luận
+        post_text = post.get("text") or ""
+        post_result = None
+        if post_text.strip():
+            try:
+                from scripts.finetune import predict_sentiment
+
+                post_result = predict_sentiment(post_text, model, tokenizer)
+            except Exception as exc:
+                _append_log(f"Loi phan tich noi dung bai: {exc}", "ERROR")
+        post_negative = bool(
+            post_result
+            and post_result["probabilities"]["Negative"] >= threshold / 100
+        )
+        if post_negative:
+            total_post_negative += 1
+
         comments = post.get("comments") or []
         analyzed_comments = []
         for comment in comments:
@@ -1053,7 +1071,11 @@ def _run_fb_analyze(posts, model, tokenizer, threshold: float, source: str = "we
             {
                 "index": post.get("index", 0),
                 "url": post.get("url", ""),
-                "text": post.get("text", ""),
+                "text": post_text,
+                "post_sentiment": post_result["sentiment"] if post_result else None,
+                "post_sentiment_vi": post_result["sentiment_vi"] if post_result else None,
+                "post_confidence": post_result["confidence"] if post_result else None,
+                "post_negative": post_negative,
                 "comments": analyzed_comments,
                 "negative_count": sum(1 for c in analyzed_comments if c["negative"]),
             }
@@ -1063,6 +1085,7 @@ def _run_fb_analyze(posts, model, tokenizer, threshold: float, source: str = "we
         "total_posts": len(analyzed_posts),
         "total_comments": sum(len(p["comments"]) for p in analyzed_posts),
         "total_negative": total_negative,
+        "total_post_negative": total_post_negative,
         "threshold": threshold,
         "done": True,
     }
@@ -1080,6 +1103,7 @@ def _run_fb_analyze(posts, model, tokenizer, threshold: float, source: str = "we
                 "posts": payload["total_posts"],
                 "comments": payload["total_comments"],
                 "negative": total_negative,
+                "post_negative": total_post_negative,
                 "threshold": threshold,
                 "sent_to": [],
                 "urls": [p.get("url", "") for p in posts if p.get("url")][:10],
@@ -1087,7 +1111,7 @@ def _run_fb_analyze(posts, model, tokenizer, threshold: float, source: str = "we
         )
     _append_log(
         f"PHAN TICH XONG: {payload['total_posts']} bai, {payload['total_comments']} binh luan, "
-        f"{total_negative} tieu cuc",
+        f"{total_negative} tieu cuc (binh luan) + {total_post_negative} bai tieu cuc (noi dung)",
         "INFO",
     )
 
