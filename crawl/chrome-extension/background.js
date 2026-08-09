@@ -55,26 +55,20 @@ function notify(id, title, message) {
 }
 
 /**
- * Xu ly 1 tab auto (?closetab=true): cho load -> dam bao content script moi
- * -> bao content chay AUTO_TAB (tu quet + gui web) -> hien badge + thong bao.
+ * Xu ly 1 tab auto (fallback alarm sweep): cho load -> dam bao content script
+ * moi -> bao content chay AUTO_TAB -> hien badge + thong bao.
  *
  * Logic:
- *   - Background bat URL qua chrome.tabs.onUpdated NGAY khi tab duoc mo
- *     (truoc khi Facebook co the viet lai URL lam mat param ?closetab=true)
- *   - Hien notification "Da phat hien - dang lay du lieu" ngay lap tuc
- *   - Cho AUTO_TAB_SETTLE_MS de FB render feed
- *   - ensureContentScript() tu ping + re-inject neu content script cu/chua co
- *   - Retry toi AUTO_TAB_RETRY lan neu trang chua san sang (loi loading)
- *   - Content tra {posts, sent} -> badge + notification OK/ERR/0 bai
- *   - Tab tu dong dong qua AUTO_TAB_DONE (handler rieng)
- *   - Xoa badge sau 5s
+ *   - Chi goi tu sweepAutoTabs() (alarm 30s) khi content chua tu phat hien
+ *     (VD content script inject tre / trang load qua cham)
+ *   - Content tu phat hien (chinh) -> AUTO_TAB_START -> tab da nam trong
+ *     handledAutoTabs -> sweep bo qua, khong chay trung
  *
  * @param {number} tabId - ID tab auto can xu ly
  * @returns {Promise<void>}
  */
 async function handleAutoTab(tabId) {
-  const notifId = "auto-" + tabId;
-  notify(notifId, "FB Grabber", "Đã phát hiện tab tự động (?closetab=true) - đang lấy dữ liệu bài viết...");
+  notify(AUTO_TAB_NOTIF_ID, "FB Grabber", "Đã phát hiện tab tự động (closetab) - đang lấy dữ liệu bài viết...");
   try {
     chrome.action.setBadgeText({ tabId, text: "FB" });
     chrome.action.setBadgeBackgroundColor({ tabId, color: "#1877F2" });
@@ -99,18 +93,18 @@ async function handleAutoTab(tabId) {
       chrome.action.setBadgeText({ tabId, text: ok ? "OK" : "ERR" });
       chrome.action.setBadgeBackgroundColor({ tabId, color: ok ? "#188038" : "#D93025" });
       if (ok) {
-        notify(notifId, "FB Grabber - XONG",
+        notify(AUTO_TAB_NOTIF_ID, "FB Grabber - XONG",
           "Lấy được " + posts + " bài viết - đã gửi về web để phân tích + gửi bot.");
       } else if (posts === 0) {
-        notify(notifId, "FB Grabber - XONG",
+        notify(AUTO_TAB_NOTIF_ID, "FB Grabber - XONG",
           "Không có bài viết mới nào (0 bài). Tab sẽ tự đóng.");
       } else {
-        notify(notifId, "FB Grabber - LOI GUI WEB",
+        notify(AUTO_TAB_NOTIF_ID, "FB Grabber - LOI GUI WEB",
           "Lấy được " + posts + " bài NHƯNG gửi web lỗi: " +
           ((resp.sent && resp.sent.message) || "không xác định"));
       }
     } else {
-      notify(notifId, "FB Grabber - KHONG PHAN HOI",
+      notify(AUTO_TAB_NOTIF_ID, "FB Grabber - KHONG PHAN HOI",
         "Không nhận được phản hồi từ trang - kiểm tra lại extension (Reload) và thử lại.");
     }
   } catch (_err) {
@@ -123,12 +117,42 @@ async function handleAutoTab(tabId) {
   }
 }
 
-// Phat hien tab auto ngay khi duoc mo (window.open tu web hoac dan tay URL)
-chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.url && info.url.includes("closetab=true") && !handledAutoTabs.has(tabId)) {
-    handledAutoTabs.add(tabId);
-    handleAutoTab(tabId);
+// Phat hien tab auto (?closetab=true / #closetab): content tu detect la chinh,
+// background chi can 2 viec - hien thong bao qua AUTO_TAB_START/DONE va quet
+// dinh ky (alarm) lam loi an toan neu content khong kip chay.
+const AUTO_TAB_NOTIF_ID = "auto-tab";
+
+/**
+ * Quet dinh ky (30s): tab nao URL con marker closetab ma chua xu ly
+ * (khong nam trong handledAutoTabs) -> xu ly fallback qua handleAutoTab().
+ *
+ * Logic:
+ *   - Loi an toan CUOI: content self-detect loi vi ly do nao (inject tre,
+ *     trang load qua cham...) thi alarm van bat duoc tab
+ *   - Content da tu chay -> da gui AUTO_TAB_START -> tab nam trong
+ *     handledAutoTabs -> bi bo qua (khong chay trung)
+ *   - Content xong -> tab da dong -> khong con tab de quet
+ */
+async function sweepAutoTabs() {
+  try {
+    const tabs = await chrome.tabs.query({ url: "*://*.facebook.com/*" });
+    for (const tab of tabs) {
+      if (!tab.url) continue;
+      const hasMarker =
+        tab.url.includes("closetab=true") || tab.url.toLowerCase().includes("#closetab");
+      if (hasMarker && !handledAutoTabs.has(tab.id)) {
+        handledAutoTabs.add(tab.id);
+        handleAutoTab(tab.id);
+      }
+    }
+  } catch (_err) {
+    // loi nho - bo qua
   }
+}
+
+chrome.alarms.create("autoTabSweep", { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm && alarm.name === "autoTabSweep") sweepAutoTabs();
 });
 
 /**
@@ -345,11 +369,47 @@ async function startCrawl(posts, tabId, originalUrl) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.type === "AUTO_TAB_START") {
+    // Content tu phat hien tab auto -> hien thong bao + badge + danh dau
+    // de alarm sweep khong xu ly trung
+    const tabId = sender && sender.tab ? sender.tab.id : null;
+    if (tabId !== null) {
+      handledAutoTabs.add(tabId);
+      chrome.action.setBadgeText({ tabId, text: "FB" });
+      chrome.action.setBadgeBackgroundColor({ tabId, color: "#1877F2" });
+    }
+    notify(AUTO_TAB_NOTIF_ID, "FB Grabber",
+      "Đã phát hiện tab tự động (closetab) - đang lấy dữ liệu bài viết...");
+    sendResponse({ ok: true });
+    return;
+  }
   if (message && message.type === "AUTO_TAB_DONE") {
-    // Auto tab (web mo ?closetab=true): content da quet + gui web xong -> DONG TAB
+    // Content da quet + gui web xong -> badge ket qua + thong bao + DONG TAB
+    const tabId = sender && sender.tab ? sender.tab.id : null;
+    const posts = message.posts || 0;
+    const ok = posts > 0 && message.sent && message.sent.ok;
+    if (tabId !== null) {
+      handledAutoTabs.delete(tabId);
+      chrome.action.setBadgeText({ tabId, text: ok ? "OK" : "ERR" });
+      chrome.action.setBadgeBackgroundColor({ tabId, color: ok ? "#188038" : "#D93025" });
+    }
+    if (ok) {
+      notify(AUTO_TAB_NOTIF_ID, "FB Grabber - XONG",
+        "Lấy được " + posts + " bài viết - đã gửi về web để phân tích + gửi bot.");
+    } else if (posts === 0) {
+      notify(AUTO_TAB_NOTIF_ID, "FB Grabber - XONG",
+        "Không có bài viết mới nào (0 bài). Tab sẽ tự đóng.");
+    } else {
+      notify(AUTO_TAB_NOTIF_ID, "FB Grabber - LOI GUI WEB",
+        "Lấy được " + posts + " bài NHƯNG gửi web lỗi: " +
+        ((message.sent && message.sent.message) || "không xác định"));
+    }
     if (sender && sender.tab) {
       chrome.tabs.remove(sender.tab.id).catch(() => {});
     }
+    setTimeout(() => {
+      chrome.action.setBadgeText({ text: "" }).catch(() => {});
+    }, 5000);
     sendResponse({ ok: true });
     return;
   }

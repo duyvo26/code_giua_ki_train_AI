@@ -323,7 +323,7 @@ let lastSavedSignature = "";
 
 // Version content script - popup kiem tra de tu inject lai khi script cu
 // con song trong tab da mo (sau khi reload extension ma chua F5 trang)
-const EXT_VERSION = 9;
+const EXT_VERSION = 10;
 
 /**
  * Doc so bai toi da tu chrome.storage.local va cap nhat bien postLimit.
@@ -540,17 +540,23 @@ async function sendPostsToWeb(posts) {
 }
 
 /**
- * Auto tab: web mo trang group kem ?closetab=true -> tu quet + gui web + tat.
+ * Auto tab: web mo trang group kem marker closetab -> tu quet + gui web + tat.
  *
  * Logic:
- *   - B1: doc postLimit tu storage, chay autoScrollScan (tu cuon lay du bai)
- *   - B2: co bai moi -> sendPostsToWeb() (web tu phan tich + tu gui bot)
- *   - B3: bao background AUTO_TAB_DONE de DONG TAB (fallback window.close)
+ *   - B1: bao background AUTO_TAB_START de hien notification + badge
+ *   - B2: doc postLimit tu storage, chay autoScrollScan (tu cuon lay du bai)
+ *   - B3: co bai moi -> sendPostsToWeb() (web tu phan tich + tu gui bot)
+ *   - B4: bao background AUTO_TAB_DONE de DONG TAB (fallback window.close)
  *   - Co loi gi cung phai bao tat tab (auto tab khong can giu lai)
  *
  * @returns {Promise<{posts: number, sent: Object|null, stopped: string}>} Tom tat
  */
 async function runAutoTab() {
+  try {
+    await chrome.runtime.sendMessage({ type: "AUTO_TAB_START" });
+  } catch (_err) {
+    // background khong nhan - van tiep tuc quet
+  }
   const { [POST_COUNT_KEY]: count } = await chrome.storage.local.get(POST_COUNT_KEY);
   const limit = parseInt(count, 10) || 5;
   const result = await autoScrollScan(limit);
@@ -571,6 +577,30 @@ async function runAutoTab() {
   }
   return summary;
 }
+
+/**
+ * Phat hien tab auto khi content script chay (document_idle).
+ *
+ * Logic:
+ *   - Marker dung dang FRAGMENT #closetab (ben vung - khong bi FB/redirect
+ *     strip) HOAC query ?closetab=true (tuong thich URL cu)
+ *   - Phat hien duoc -> cho 4s cho FB render feed roi chay runAutoTab()
+ *   - Day la nguon phat hien CHINH; background chi dang tab + lưới alarm
+ */
+function maybeRunAutoTab() {
+  try {
+    const hasHash = location.hash.toLowerCase().includes("closetab");
+    const hasQuery = new URLSearchParams(location.search).get("closetab") === "true";
+    if (hasHash || hasQuery) {
+      setTimeout(() => {
+        runAutoTab().catch(() => {});
+      }, 4000);
+    }
+  } catch (_err) {
+    // loi nho - bo qua
+  }
+}
+maybeRunAutoTab();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message && message.type === "PING") {

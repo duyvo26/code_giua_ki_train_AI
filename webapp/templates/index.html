@@ -2167,8 +2167,9 @@ NOI DUNG:
                 if (!due.length) return;
                 const acked = [];
                 for (const item of due) {
-                    const sep = item.url.includes("?") ? "&" : "?";
-                    const opened = window.open(item.url + sep + "closetab=true", "_blank");
+                    // Marker dung dang FRAGMENT #closetab - ben vung nhat (khong
+                    // bi FB/redirect strip, khong gui len server)
+                    const opened = window.open(item.url + "#closetab", "_blank");
                     if (opened) acked.push(item.id);
                 }
                 if (acked.length) {
