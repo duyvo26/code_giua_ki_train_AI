@@ -13,8 +13,9 @@ const POST_COUNT_KEY = "fb_post_count";
 const LOAD_WAIT_KEY = "fb_load_wait";
 const WEB_URL_KEY = "fb_web_url";
 const API_KEY_KEY = "fb_api_key";
+const NEG_THRESHOLD_KEY = "fb_neg_threshold";
 // Phai khop EXT_VERSION trong content.js - neu cu hon thi re-inject lai
-const EXPECTED_EXT_VERSION = 12;
+const EXPECTED_EXT_VERSION = 13;
 
 const buttonDownload = document.getElementById("download");
 const buttonClear = document.getElementById("clearPosts");
@@ -22,6 +23,7 @@ const buttonScan = document.getElementById("scan");
 const buttonSaveConfig = document.getElementById("saveConfig");
 const countInput = document.getElementById("postCount");
 const loadWaitInput = document.getElementById("loadWait");
+const negThresholdInput = document.getElementById("negThreshold");
 const webConfigInput = document.getElementById("webConfigJson");
 const statusEl = document.getElementById("status");
 const resultEl = document.getElementById("result");
@@ -226,7 +228,10 @@ async function sendToWeb(posts) {
   const resp = await fetch(webUrl + "/api/extension/analyze", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-API-Key": apiKeyState },
-    body: JSON.stringify({ posts }),
+    body: JSON.stringify({
+      posts,
+      threshold: parseInt(negThresholdInput.value, 10) || 70,
+    }),
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(data.error || ("HTTP " + resp.status));
@@ -370,11 +375,24 @@ loadWaitInput.addEventListener("change", () => {
   });
 });
 
+negThresholdInput.addEventListener("change", () => {
+  const value = parseInt(negThresholdInput.value, 10);
+  if (isNaN(value) || value < 0 || value > 100) {
+    negThresholdInput.value = 70;
+    setStatus("Nguong do tin cay phai trong 0-100% - dat lai 70.", "error");
+    return;
+  }
+  chrome.storage.local.set({ [NEG_THRESHOLD_KEY]: value }).then(() => {
+    setStatus("Nguong do tin cay tieu cuc: " + value + "%. Ap dung khi gui web.", "ok");
+  });
+});
+
 chrome.storage.local.get([
-  STORAGE_KEY, POST_COUNT_KEY, LOAD_WAIT_KEY, WEB_URL_KEY, API_KEY_KEY,
+  STORAGE_KEY, POST_COUNT_KEY, LOAD_WAIT_KEY, WEB_URL_KEY, API_KEY_KEY, NEG_THRESHOLD_KEY,
 ]).then((data) => {
   if (data[POST_COUNT_KEY]) countInput.value = data[POST_COUNT_KEY];
   if (data[LOAD_WAIT_KEY]) loadWaitInput.value = data[LOAD_WAIT_KEY];
+  if (data[NEG_THRESHOLD_KEY]) negThresholdInput.value = data[NEG_THRESHOLD_KEY];
   if (data[WEB_URL_KEY]) webUrlState = data[WEB_URL_KEY];
   if (data[API_KEY_KEY]) apiKeyState = data[API_KEY_KEY];
   refreshFromStorage();

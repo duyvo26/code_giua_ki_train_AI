@@ -309,6 +309,7 @@ const POST_COUNT_KEY = "fb_post_count";
 const LOAD_WAIT_KEY = "fb_load_wait";
 const WEB_URL_KEY = "fb_web_url";
 const API_KEY_KEY = "fb_api_key";
+const NEG_THRESHOLD_KEY = "fb_neg_threshold";
 
 // Auto-scroll: cuon tung buoc, cho lazy-load roi thu thap cong don
 const SCROLL_STEP_PX = 1200;
@@ -323,7 +324,7 @@ let lastSavedSignature = "";
 
 // Version content script - popup kiem tra de tu inject lai khi script cu
 // con song trong tab da mo (sau khi reload extension ma chua F5 trang)
-const EXT_VERSION = 12;
+const EXT_VERSION = 13;
 
 /**
  * Doc so bai toi da tu chrome.storage.local va cap nhat bien postLimit.
@@ -585,10 +586,8 @@ function hideAutoBar() {
  * @returns {Promise<{ok: boolean, message: string}>} Ket qua gui
  */
 async function sendPostsToWeb(posts) {
-  const { [WEB_URL_KEY]: webUrl, [API_KEY_KEY]: apiKey } = await chrome.storage.local.get([
-    WEB_URL_KEY,
-    API_KEY_KEY,
-  ]);
+  const { [WEB_URL_KEY]: webUrl, [API_KEY_KEY]: apiKey, [NEG_THRESHOLD_KEY]: threshold } =
+    await chrome.storage.local.get([WEB_URL_KEY, API_KEY_KEY, NEG_THRESHOLD_KEY]);
   if (!webUrl || !apiKey) {
     return { ok: false, message: "chua cau hinh web trong extension" };
   }
@@ -596,7 +595,10 @@ async function sendPostsToWeb(posts) {
     const resp = await fetch(webUrl.replace(/\/+$/, "") + "/api/extension/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
-      body: JSON.stringify({ posts }),
+      body: JSON.stringify({
+        posts,
+        threshold: parseInt(threshold, 10) || 70,
+      }),
     });
     const data = await resp.json().catch(() => ({}));
     return { ok: resp.ok, message: data.message || data.error || ("HTTP " + resp.status) };
