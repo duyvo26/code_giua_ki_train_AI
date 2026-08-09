@@ -75,6 +75,10 @@
                 class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-border bg-muted text-slate-400 hover:text-slate-200 transition-colors duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:outline-none">
             Bots
         </button>
+        <button data-tab="fb"
+                class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-border bg-muted text-slate-400 hover:text-slate-200 transition-colors duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none">
+            Phân tích bình luận FB
+        </button>
     </nav>
 
     <div id="tab-overview">
@@ -342,6 +346,72 @@
 
     </main>
     </div><!-- /tab-bots -->
+
+    <div id="tab-fb" class="hidden">
+    <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+        <section class="bg-surface border border-border rounded-xl p-5">
+            <h2 class="font-semibold mb-1 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-amber-400"></span> Phân tích bình luận công khai từ Facebook
+            </h2>
+            <p class="text-[12px] text-slate-400 mb-4 leading-relaxed">
+                Bước 1: dùng extension <code class="text-amber-300 font-mono text-[11px]">FB Group URL Grabber</code> quét bài viết,
+                tải file <code class="text-amber-300 font-mono text-[11px]">fb_posts_content.txt</code> hoặc
+                <code class="text-amber-300 font-mono text-[11px]">.json</code> về. Bước 2: dán nội dung vào ô dưới (hoặc upload file)
+                rồi bấm <b>Phân tích</b>. Bước 3: bấm <b>Gửi cảnh báo bot</b> khi có bình luận tiêu cực.
+            </p>
+            <div class="space-y-3">
+                <textarea id="fb-text" rows="8" placeholder='Dan text fb_posts_content.txt/.json vao day, vi du:
+=== BAI 1 ===
+URL: https://www.facebook.com/groups/762609615053439/posts/1749329799714744
+NOI DUNG:
+  Tuyen dung nhan vien...
+--- BINH LUAN ---
+1. Cua hang that te, khong nen mua'
+                          class="w-full bg-slate-900 border border-border rounded-md px-3 py-2 font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-500 resize-y"></textarea>
+                <div class="flex flex-wrap items-center gap-3">
+                    <input id="fb-file" type="file" accept=".txt,.json,text/plain,application/json"
+                           class="text-[11px] text-slate-400 file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-muted file:text-slate-200 file:text-[11px] file:font-medium file:cursor-pointer hover:file:bg-slate-700/70 cursor-pointer">
+                    <button id="fb-parse" class="px-4 py-2 rounded-md bg-muted hover:bg-slate-700/70 text-xs font-medium transition-colors duration-200 cursor-pointer">Parse thử</button>
+                    <button id="fb-analyze" class="px-4 py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-semibold transition-colors duration-200 cursor-pointer">Phân tích cảm xúc</button>
+                    <button id="fb-notify" class="px-4 py-2 rounded-md bg-red-950/70 hover:bg-red-900/70 text-red-300 border border-red-900 text-xs font-medium transition-colors duration-200 cursor-pointer">Gửi cảnh báo bot</button>
+                    <select id="fb-bot-type" class="bg-slate-900 border border-border rounded-md px-2 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <option value="telegram">Telegram</option>
+                        <option value="zalo">Zalo</option>
+                    </select>
+                </div>
+                <p id="fb-status" class="text-[11px] text-slate-500">Chưa có dữ liệu - dán text hoặc upload file rồi bấm Phân tích.</p>
+            </div>
+        </section>
+
+        <section id="fb-summary" class="hidden">
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-surface border border-border rounded-xl p-4">
+                    <p class="text-[11px] uppercase tracking-wide text-slate-400">Bài viết</p>
+                    <p id="fb-sum-posts" class="mt-1 text-2xl font-bold text-amber-400">--</p>
+                </div>
+                <div class="bg-surface border border-border rounded-xl p-4">
+                    <p class="text-[11px] uppercase tracking-wide text-slate-400">Bình luận phân tích</p>
+                    <p id="fb-sum-comments" class="mt-1 text-2xl font-bold text-sky-400">--</p>
+                </div>
+                <div class="bg-surface border border-border rounded-xl p-4">
+                    <p class="text-[11px] uppercase tracking-wide text-slate-400">Bình luận tiêu cực</p>
+                    <p id="fb-sum-negative" class="mt-1 text-2xl font-bold text-red-400">--</p>
+                </div>
+                <div class="bg-surface border border-border rounded-xl p-4">
+                    <p class="text-[11px] uppercase tracking-wide text-slate-400">Trạng thái</p>
+                    <p id="fb-sum-status" class="mt-1 text-lg font-bold text-emerald-400">--</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="fb-results" class="hidden">
+            <h3 class="font-semibold mb-3 text-sm">Kết quả phân tích từng bài</h3>
+            <div id="fb-results-list" class="space-y-4"></div>
+        </section>
+
+    </main>
+    </div><!-- /tab-fb -->
 
     <footer class="max-w-7xl mx-auto px-4 pb-8 text-center text-[11px] text-slate-600">
         Máy học nâng cao - 25MIT-1A | PhoBERT-base-v2 fine-tuned trên UIT-VSFC | Dữ liệu xử lý 100% cục bộ
@@ -766,6 +836,7 @@
             document.getElementById("tab-overview").classList.toggle("hidden", name !== "overview");
             document.getElementById("tab-info").classList.toggle("hidden", name !== "info");
             document.getElementById("tab-bots").classList.toggle("hidden", name !== "bots");
+            document.getElementById("tab-fb").classList.toggle("hidden", name !== "fb");
             document.querySelectorAll(".tab-btn").forEach(b => {
                 const active = b.dataset.tab === name;
                 b.classList.toggle("bg-surface", active);
@@ -1165,6 +1236,139 @@
             }
         }
 
+        // ---------- Phân tích bình luận Facebook ----------
+        let fbAnalysis = null;
+        const fbEl = (id) => document.getElementById(id);
+        const fbStatus = (msg, color = "text-slate-500") => {
+            fbEl("fb-status").textContent = msg;
+            fbEl("fb-status").className = "text-[11px] " + color;
+        };
+
+        function readFbInput() {
+            const file = fbEl("fb-file").files && fbEl("fb-file").files[0];
+            if (file) return file.text().then(t => t);
+            return Promise.resolve(fbEl("fb-text").value || "");
+        }
+
+        async function fbFetch(url, body) {
+            const resp = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.error || ("HTTP " + resp.status));
+            return data;
+        }
+
+        function renderFbSummary() {
+            const s = fbEl("fb-summary");
+            s.classList.remove("hidden");
+            const total = fbAnalysis.total_posts || 0;
+            const comments = fbAnalysis.total_comments || 0;
+            const negative = fbAnalysis.total_negative || 0;
+            fbEl("fb-sum-posts").textContent = total;
+            fbEl("fb-sum-comments").textContent = comments;
+            fbEl("fb-sum-negative").textContent = negative;
+            fbEl("fb-sum-status").textContent = "Hoàn tất";
+            fbEl("fb-sum-status").className = "text-lg font-bold " + (negative > 0 ? "text-red-400" : "text-emerald-400");
+        }
+
+        function renderFbResults() {
+            const list = fbEl("fb-results-list");
+            list.innerHTML = "";
+            const posts = fbAnalysis.posts || [];
+            posts.forEach(post => {
+                const negCount = post.negative_count || 0;
+                const card = document.createElement("div");
+                card.className = "bg-surface border border-border rounded-xl p-4";
+                const negBadge = negCount > 0
+                    ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-950/70 text-red-300 border border-red-900">${negCount} tiêu cực</span>`
+                    : `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-slate-400 border border-border">không tiêu cực</span>`;
+                card.innerHTML = `
+                    <div class="flex items-start justify-between gap-3 mb-2">
+                        <div class="min-w-0">
+                            <p class="text-[11px] text-slate-500">Bài ${post.index}</p>
+                            <a href="${post.url}" target="_blank" class="text-sky-400 text-[11px] font-mono break-all hover:underline">${post.url}</a>
+                            ${post.text ? `<p class="mt-1 text-[12px] text-slate-300 whitespace-pre-wrap break-words">${post.text.slice(0, 300)}${post.text.length > 300 ? "…" : ""}</p>` : ""}
+                        </div>
+                        ${negBadge}
+                    </div>
+                    <div class="space-y-1.5 mt-2">
+                        ${(post.comments || []).map(c => `
+                            <div class="rounded-md px-3 py-2 text-[12px] ${c.negative ? "bg-red-950/40 border border-red-900/60" : "bg-muted/50 border border-border/50"}">
+                                <span class="font-semibold ${c.negative ? "text-red-300" : "text-slate-400"}">${c.sentiment_vi}</span>
+                                <span class="text-slate-500">(${(c.confidence * 100).toFixed(0)}%)</span>
+                                <span class="text-slate-300 ml-1">${c.text}</span>
+                            </div>`).join("") || `<p class="text-[11px] text-slate-500">Không có bình luận</p>`}
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+            fbEl("fb-results").classList.remove("hidden");
+        }
+
+        async function fbParse() {
+            const text = await readFbInput();
+            if (!text.trim()) { fbStatus("Chưa có nội dung - dán text hoặc chọn file trước.", "text-amber-400"); return; }
+            fbStatus("Đang parse...", "text-sky-400");
+            try {
+                const data = await fbFetch("/api/fb-posts/parse", { text });
+                const n = (data.posts || []).length;
+                fbStatus(`Parse xong: ${n} bài viết${data.warnings && data.warnings.length ? " (" + data.warnings.length + " cảnh báo)" : ""}.`,
+                    n > 0 ? "text-emerald-400" : "text-amber-400");
+            } catch (err) {
+                fbStatus("Lỗi parse: " + err.message, "text-red-400");
+            }
+        }
+
+        async function fbAnalyze() {
+            const text = await readFbInput();
+            if (!text.trim()) { fbStatus("Chưa có nội dung - dán text hoặc chọn file trước.", "text-amber-400"); return; }
+            fbEl("fb-summary").classList.add("hidden");
+            fbEl("fb-results").classList.add("hidden");
+            fbStatus("Đang phân tích cảm xúc bình luận (có thể mất 30s-2 phút)...", "text-amber-400");
+            fbAnalysis = null;
+            try {
+                await fbFetch("/api/fb-posts/analyze", { text });
+                fbStatus("Đã bắt đầu phân tích - đang chờ kết quả...", "text-sky-400");
+                pollFbAnalysis();
+            } catch (err) {
+                fbStatus("Lỗi phân tích: " + err.message, "text-red-400");
+            }
+        }
+
+        async function pollFbAnalysis() {
+            for (let i = 0; i < 120; i++) {
+                await new Promise(r => setTimeout(r, 2000));
+                try {
+                    const snap = await fetch("/api/fb-posts/analyze").then(r => r.ok ? r.json() : {});
+                    if (snap && snap.done) {
+                        fbAnalysis = snap;
+                        renderFbSummary();
+                        renderFbResults();
+                        const n = snap.total_negative || 0;
+                        fbStatus(`Phân tích xong: ${snap.total_comments} bình luận, ${n} tiêu cực. Bấm "Gửi cảnh báo bot" nếu muốn thông báo.`,
+                            n > 0 ? "text-red-300" : "text-emerald-400");
+                        return;
+                    }
+                } catch (e) { /* chưa sẵn sàng */ }
+            }
+            fbStatus("Hết thời gian chờ kết quả - xem file results/fb_analysis.json hoặc thử lại.", "text-amber-400");
+        }
+
+        async function fbNotify() {
+            if (!fbAnalysis) { fbStatus("Chưa có kết quả phân tích - bấm Phân tích trước.", "text-amber-400"); return; }
+            const type = fbEl("fb-bot-type").value;
+            fbStatus("Đang gửi cảnh báo qua bot " + type + "...", "text-sky-400");
+            try {
+                const data = await fbFetch("/api/fb-posts/notify", { type });
+                fbStatus(data.message, data.ok ? "text-emerald-400" : "text-red-400");
+            } catch (err) {
+                fbStatus("Lỗi gửi cảnh báo: " + err.message, "text-red-400");
+            }
+        }
+
         // ---------- Khởi tạo ----------
         document.querySelectorAll(".tab-btn").forEach(btn =>
             btn.addEventListener("click", () => switchTab(btn.dataset.tab)));
@@ -1199,6 +1403,10 @@
         // Tự lưu config vào localStorage khi gõ (không mất khi reload/restart Colab)
         ["tg-token", "tg-chatid", "zl-token", "zl-base", "zl-chatid"].forEach(id =>
             document.getElementById(id).addEventListener("input", botLocalSave));
+        // Phân tích bình luận FB
+        document.getElementById("fb-parse").addEventListener("click", fbParse);
+        document.getElementById("fb-analyze").addEventListener("click", fbAnalyze);
+        document.getElementById("fb-notify").addEventListener("click", fbNotify);
 
         loadModelInfo();
         loadTrainConfig();

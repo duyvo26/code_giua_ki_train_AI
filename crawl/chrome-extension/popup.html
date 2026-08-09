@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 380px; font-family: -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 12px; }
+    h1 { font-size: 14px; margin: 0 0 8px; color: #1877f2; }
+    button {
+      width: 100%; padding: 9px; font-size: 13px; font-weight: 600;
+      background: #1877f2; color: #fff; border: none; border-radius: 6px; cursor: pointer;
+      margin-bottom: 6px;
+    }
+    button:hover { background: #166fe5; }
+    button:disabled { background: #a5c9f7; cursor: wait; }
+    button.secondary { background: #e4e6eb; color: #1c1e21; }
+    button.secondary:hover { background: #d8dadf; }
+    #hint { font-size: 11px; color: #888; margin-bottom: 8px; }
+    label { display: block; font-size: 12px; color: #333; margin-bottom: 4px; }
+    input[type="number"] {
+      width: 100%; padding: 6px 8px; font-size: 13px; box-sizing: border-box;
+      border: 1px solid #ccc; border-radius: 6px; margin-bottom: 8px;
+    }
+    #status { margin-top: 6px; font-size: 12px; color: #555; min-height: 16px; }
+    #result { margin-top: 8px; font-size: 11px; word-break: break-all; }
+    #result .item { padding: 6px 0; border-bottom: 1px solid #eee; }
+    #result .url { color: #1877f2; }
+    #result .badge { margin-top: 2px; font-weight: 600; }
+    #result .badge-ok { color: #188038; }
+    #result .badge-error { color: #d93025; }
+    #result .badge-wait { color: #b06000; }
+    #result .preview { color: #555; margin-top: 2px; max-height: 40px; overflow: hidden; }
+    .error { color: #d93025; }
+    .ok { color: #188038; }
+  </style>
+</head>
+<body>
+  <h1>FB Group URL Grabber</h1>
+  <div id="hint">Khong tu dong quet - ban tu cuon trang den bai muon lay roi bam "Quet ngay". Quet xong la dung.</div>
+  <label for="postCount">So bai co binh luan cong khai can tim:</label>
+  <input type="number" id="postCount" min="1" max="50" value="5">
+  <button id="scan">Quet ngay (tab group dang mo)</button>
+  <div id="status">Chua co du lieu. Mo trang group bat ky.</div>
+  <div id="result"></div>
+  <button id="download" class="secondary" disabled>Tai file fb_posts_content.txt</button>
+  <button id="downloadJson" class="secondary" disabled>Tai file fb_posts_content.json</button>
+  <script src="popup.js"></script>
+</body>
+</html>

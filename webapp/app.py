@@ -753,6 +753,15 @@ def bot_status():
     return jsonify(status)
 
 
+@app.get("/api/fb-posts/analyze")
+def fb_posts_analyze_status():
+    """Trạng thái phân tích FB: trả kết quả fb_analysis.json nếu đã xong."""
+    analysis_file = RESULTS_DIR / "fb_analysis.json"
+    if not analysis_file.exists():
+        return jsonify({"done": False})
+    return jsonify(json.loads(analysis_file.read_text(encoding="utf-8")))
+
+
 @app.get("/api/bot/log")
 def bot_log():
     """Log bot tăng dần theo since (poll 2s, giống /api/train-log)."""
@@ -762,6 +771,194 @@ def bot_log():
     if log is None:
         return jsonify({"lines": []})
     return jsonify({"lines": [line for line in log if line["id"] > since]})
+
+
+@app.post("/api/fb-posts/parse")
+def fb_posts_parse():
+    """
+    Parse dữ liệu FB từ extension (JSON hoặc TXT chuẩn) -> cấu trúc bài viết.
+
+    Logic:
+      - Nhận {text} (dán trực tiếp) HOẶC {file} (upload, đọc dạng text)
+      - Gọi parse_fb_data() -> {posts, warnings}
+      - Lưu snapshot vào results/fb_posts.json để bước analyze dùng lại
+    """
+    data = request.get_json(silent=True) or {}
+    raw_text = (data.get("text") or "").strip()
+    if not raw_text and data.get("file"):
+        try:
+            raw_text = data["file"].decode("utf-8", errors="replace")
+        except Exception as exc:
+            return jsonify({"error": f"Khong doc duoc file: {exc}"}), 400
+    if not raw_text:
+        return jsonify({"error": "Vui long dan text hoac upload file txt/json"}), 400
+
+    from webapp.fb_data_parser import parse_fb_data
+
+    parsed = parse_fb_data(raw_text)
+    with contextlib.suppress(Exception):
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        (RESULTS_DIR / "fb_posts.json").write_text(
+            json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    return jsonify(parsed)
+
+
+@app.post("/api/fb-posts/analyze")
+def fb_posts_analyze():
+    """
+    Phân tích cảm xúc bình luận công khai của các bài viết FB.
+
+    Logic:
+      - Dùng dữ liệu đã parse (truyền {text} lại hoặc đọc fb_posts.json)
+      - Nếu thiếu model -> trả lỗi hướng dẫn train
+      - Cache model (giống bots/common) để chạy nhanh nhiều lần
+      - Bình luận tiêu cực = Negative prob >= 0.5 (phân loại mặc định)
+      - Lưu kết quả results/fb_analysis.json
+    """
+    data = request.get_json(silent=True) or {}
+
+    if (data.get("text") or "").strip():
+        from webapp.fb_data_parser import parse_fb_data
+
+        parsed = parse_fb_data(data["text"])
+    else:
+        snapshot = RESULTS_DIR / "fb_posts.json"
+        if not snapshot.exists():
+            return jsonify({"error": "Chua co du lieu - hay Parse truoc hoac dan text"}), 400
+        parsed = json.loads(snapshot.read_text(encoding="utf-8"))
+
+    posts = parsed.get("posts") or []
+    if not posts:
+        return jsonify({"error": "Khong co bai viet nao de phan tich", "warnings": parsed.get("warnings", [])}), 400
+
+    try:
+        from scripts.finetune import load_sentiment_model, predict_sentiment
+
+        model, tokenizer = load_sentiment_model()
+    except OSError as exc:
+        return jsonify({"error": f"Chua co model: {exc}. Hay bam Train truoc."}), 500
+
+    analyze_thread = threading.Thread(
+        target=_run_fb_analyze,
+        args=(posts, model, tokenizer),
+        daemon=True,
+    )
+    analyze_thread.start()
+    return jsonify({"ok": True, "message": "Dang phan tich..."})
+
+
+def _run_fb_analyze(posts, model, tokenizer) -> None:
+    """Thread nền: phân tích từng bình luận, lưu fb_analysis.json + log."""
+    _append_log("=== BAT DAU PHAN TICH BINH LUAN FACEBOOK ===", "INFO")
+    analyzed_posts = []
+    total_negative = 0
+    for post in posts:
+        comments = post.get("comments") or []
+        analyzed_comments = []
+        for comment in comments:
+            try:
+                from scripts.finetune import predict_sentiment
+
+                result = predict_sentiment(comment, model, tokenizer)
+            except Exception as exc:
+                _append_log(f"Loi phan tich binh luan: {exc}", "ERROR")
+                continue
+            negative = result["probabilities"]["Negative"] >= 0.5
+            if negative:
+                total_negative += 1
+            analyzed_comments.append(
+                {
+                    "text": comment,
+                    "sentiment": result["sentiment"],
+                    "sentiment_vi": result["sentiment_vi"],
+                    "confidence": result["confidence"],
+                    "probabilities": result["probabilities"],
+                    "negative": negative,
+                }
+            )
+        analyzed_posts.append(
+            {
+                "index": post.get("index", 0),
+                "url": post.get("url", ""),
+                "text": post.get("text", ""),
+                "comments": analyzed_comments,
+                "negative_count": sum(1 for c in analyzed_comments if c["negative"]),
+            }
+        )
+    payload = {
+        "posts": analyzed_posts,
+        "total_posts": len(analyzed_posts),
+        "total_comments": sum(len(p["comments"]) for p in analyzed_posts),
+        "total_negative": total_negative,
+        "done": True,
+    }
+    with contextlib.suppress(Exception):
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        (RESULTS_DIR / "fb_analysis.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    _append_log(
+        f"PHAN TICH XONG: {payload['total_posts']} bai, {payload['total_comments']} binh luan, "
+        f"{total_negative} tieu cuc",
+        "INFO",
+    )
+
+
+@app.post("/api/fb-posts/notify")
+def fb_posts_notify():
+    """
+    Gửi cảnh báo bot (telegram/zalo): danh sách bài viết có bình luận tiêu cực.
+
+    Logic:
+      - Đọc kết quả fb_analysis.json (phải analyze trước)
+      - Lọc bài có negative_count > 0, soạn tin nhắn -> bot.send()
+      - Thiếu token/chat_id -> báo lỗi rõ cho UI
+    """
+    data = request.get_json(silent=True) or {}
+    bot_type = (data.get("type") or "").strip() or "telegram"
+
+    analysis_file = RESULTS_DIR / "fb_analysis.json"
+    if not analysis_file.exists():
+        return jsonify({"error": "Chua co ket qua phan tich - hay bam Phan tich truoc"}), 400
+    analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
+
+    negative_posts = [p for p in analysis.get("posts", []) if p.get("negative_count", 0) > 0]
+    if not negative_posts:
+        return jsonify({"ok": True, "message": "Khong co bai nao co binh luan tieu cuc - khong can gui"})
+
+    bot = _resolve_bot(bot_type)
+    if bot is None:
+        return jsonify({"ok": False, "error": "Loai bot khong hop le"}), 400
+
+    cfg = load_config()[bot_type]
+    chat_id = str(cfg.get("chat_id") or "").strip()
+    if not (cfg.get("token", "").strip() and chat_id):
+        return jsonify({
+            "ok": False,
+            "error": f"Bot {bot_type} chua cau hinh token/chat_id - vao tab Bot de cau hinh",
+        })
+
+    from webapp.bots.common import chunk_text
+
+    lines = []
+    for post in negative_posts:
+        neg_comments = [c for c in post["comments"] if c.get("negative")]
+        lines.append(
+            f"- Bai {post['index']} ({post['url']}): {len(neg_comments)} binh luan tieu cuc\n"
+            + "\n".join(
+                f"   + {c['text'][:150]} (Do tin cay: {c['confidence']:.0%})" for c in neg_comments
+            )
+        )
+    message = "CANH BAO: Co binh luan TIEU CUC tren bai viet Facebook:\n" + "\n".join(lines)
+    sent = False
+    for chunk in chunk_text(message, max_chars=4000):
+        sent = bot.send(chat_id, chunk) or sent
+        time.sleep(0.3)
+    if not sent:
+        return jsonify({"ok": False, "error": f"Gui tin nhan that bai qua {bot_type} - xem log bot"})
+    _append_log(f"Da gui canh bao {len(negative_posts)} bai tieu cuc qua bot {bot_type}", "INFO")
+    return jsonify({"ok": True, "message": f"Da gui canh bao {len(negative_posts)} bai qua {bot_type}"})
 
 
 if __name__ == "__main__":

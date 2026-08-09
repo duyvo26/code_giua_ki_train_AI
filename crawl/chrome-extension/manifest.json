@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "FB Group URL Grabber",
+  "version": "3.0",
+  "description": "Lay URL bai viet moi nhat cua bat ky group Facebook, mo tung bai va trich noi dung",
+  "permissions": ["downloads", "storage", "tabs", "scripting"],
+  "host_permissions": [
+    "*://www.facebook.com/groups/*",
+    "*://m.facebook.com/groups/*",
+    "*://m.facebook.com/story.php*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://www.facebook.com/groups/*",
+        "*://m.facebook.com/groups/*",
+        "*://m.facebook.com/story.php*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FB Group URL Grabber"
+  }
+}
