@@ -61,6 +61,7 @@ function cleanText(text) {
 
 function findPostContainers() {
   const containers = [];
+  let mountFound = false;
   const roots = document.querySelectorAll('[id^="mount_0_"]');
   for (const root of roots) {
     const base = root.querySelector(
@@ -69,6 +70,7 @@ function findPostContainers() {
         "div > div > div:nth-child(1) > div:nth-child(2) > div"
     );
     if (base) {
+      mountFound = true;
       for (const child of base.children) {
         if (child.querySelector('a[href*="/posts/"], a[href*="story_fbid"], a[href*="permalink"]')) {
           containers.push(child);
@@ -76,10 +78,18 @@ function findPostContainers() {
       }
     }
   }
-  if (containers.length > 0) return containers;
-  return Array.from(document.querySelectorAll('[role="article"]')).filter(
+  if (containers.length > 0) return { containers, mountFound };
+  const articles = Array.from(document.querySelectorAll('[role="article"]')).filter(
     (a) => !a.closest("[data-commentid]")
   );
+  return { containers: articles, mountFound };
+}
+
+function scanDiagnostics() {
+  const rootCount = document.querySelectorAll('[id^="mount_0_"]').length;
+  const articleCount = document.querySelectorAll('[role="article"]').length;
+  const commentCount = document.querySelectorAll("[data-commentid]").length;
+  return { rootCount, articleCount, commentCount };
 }
 
 function extractCommentsFromPost(container) {
@@ -147,18 +157,20 @@ function extractPostFromContainer(el, groupId, seen) {
 
 function collectPostsWithComments(limit) {
   const groupId = currentGroupId();
-  if (!groupId) return { posts: [], groupId: null };
+  if (!groupId) return { posts: [], groupId: null, debug: scanDiagnostics() };
   const limitPosts = limit && limit > 0 ? limit : 5;
   const seen = new Set();
   const posts = [];
-  for (const el of findPostContainers()) {
+  const found = findPostContainers();
+  const containers = found.containers;
+  for (const el of containers) {
     const post = extractPostFromContainer(el, groupId, seen);
     if (!post) continue;
     seen.add(post.postId);
     posts.push({ url: post.url, postText: post.postText, comments: post.comments });
     if (posts.length >= limitPosts) break;
   }
-  return { posts, groupId };
+  return { posts, groupId, debug: { ...scanDiagnostics(), containers: containers.length, mountFound: found.mountFound } };
 }
 
 /* --- QUET THEO YEU CAU: chi chay khi bam nut "Quet ngay" ------------------- */
@@ -202,7 +214,6 @@ function scanNow() {
   saveIfNew(result.posts);
   return result;
 }
-
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[POST_COUNT_KEY]) {
     applyPostCount();
@@ -215,7 +226,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   } else if (message && message.type === "SCAN_NOW") {
     const result = scanNow();
     const totalComments = result.posts.reduce((sum, p) => sum + p.comments.length, 0);
-    sendResponse({ count: result.posts.length, totalComments, groupId: result.groupId });
+    sendResponse({
+      count: result.posts.length,
+      totalComments,
+      groupId: result.groupId,
+      debug: result.debug || null,
+    });
+  } else if (message && message.type === "SCAN_DEBUG") {
+    sendResponse({ ...scanDiagnostics(), groupId: currentGroupId(), url: location.href });
   } else if (message && message.type === "COLLECT_POSTS") {
     sendResponse({ urls: collectPostUrls(), groupId: currentGroupId() });
   } else if (message && message.type === "COLLECT_POSTS_WITH_COMMENTS") {

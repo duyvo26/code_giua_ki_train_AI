@@ -90,7 +90,6 @@ function refreshFromStorage() {
       render(posts);
       buttonDownload.disabled = false;
       buttonDownloadJson.disabled = false;
-      buttonDownloadJson.disabled = false;
       const totalComments = posts.reduce((sum, p) => sum + (p.commentCount || 0), 0);
       setStatus(
         "Da co " + posts.length + " bai viet, tong " + totalComments + " binh luan cong khai.",
@@ -151,7 +150,15 @@ buttonScan.addEventListener("click", async () => {
     if (resp && resp.count > 0) {
       setStatus("Group " + (resp.groupId || "?") + ": quet xong - " + resp.count + " bai, " + resp.totalComments + " binh luan cong khai. Da dung.", "ok");
     } else {
-      setStatus("Quet xong (da dung): khong co bai nao co binh luan cong khai trong tam nhin. Cuon them roi quet lai.", "error");
+      const dbg = (resp && resp.debug) || {};
+      setStatus(
+        "Quet xong: KHONG co bai nao co binh luan cong khai trong tam nhin." +
+        " Cuon them roi quet lai. [debug: group=" + (resp ? resp.groupId : "?") +
+        " mountRoots=" + dbg.rootCount + " articles=" + dbg.articleCount +
+        " comments=" + dbg.commentCount + " containers=" + dbg.containers +
+        " mountPath=" + dbg.mountFound + "]",
+        "error"
+      );
     }
   } catch (err) {
     setStatus("Loi quet: " + err.message, "error");
