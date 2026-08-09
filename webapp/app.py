@@ -64,6 +64,10 @@ from transformers import TrainerCallback  # noqa: E402
 
 app = Flask(__name__)
 
+# Tự reload template khi sửa index.html - không phải restart server mỗi lần
+# (Flask debug=False mặc định cache template -> thay đổi UI không hiện)
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+
 
 @app.after_request
 def _add_cors_headers(response):
