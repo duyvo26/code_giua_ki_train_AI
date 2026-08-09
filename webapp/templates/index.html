@@ -530,6 +530,18 @@ NOI DUNG:
             <div id="history-list" class="text-[11px] text-slate-500">Đang tải...</div>
         </section>
 
+        <!-- Modal chi tiết bài viết + bình luận của 1 lượt lấy -->
+        <div id="hist-modal" class="hidden fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+            <div class="bg-surface border border-border rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col">
+                <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
+                    <h3 class="text-sm font-semibold">Chi tiết dữ liệu đã lấy</h3>
+                    <button id="hist-modal-close"
+                            class="px-3 py-1 rounded-md bg-muted hover:bg-slate-700/70 text-[11px] font-medium transition-colors duration-200 cursor-pointer">Đóng</button>
+                </div>
+                <div id="hist-modal-body" class="p-4 overflow-y-auto space-y-3 text-xs"></div>
+            </div>
+        </div>
+
     </main>
     </div><!-- /tab-history -->
 
@@ -2006,14 +2018,97 @@ NOI DUNG:
                                     <td class="py-2 pr-3 text-right font-semibold ${e.negative > 0 ? "text-red-400" : "text-emerald-400"}">${e.negative}</td>
                                     <td class="py-2 pr-3 text-right font-semibold ${e.post_negative > 0 ? "text-red-400" : "text-emerald-400"}">${e.post_negative != null ? e.post_negative : "-"}</td>
                                     <td class="py-2 pr-3 text-right text-slate-400">${e.threshold != null ? e.threshold.toFixed(0) + "%" : "-"}</td>
-                                    <td class="py-2 text-slate-300">${(e.sent_to || []).length ? e.sent_to.map(t => t === "telegram" ? "Telegram" : "Zalo").join(" + ") : '<span class="text-slate-500">-</span>'}</td>
+                                    <td class="py-2 text-right whitespace-nowrap">
+                                        ${e.snapshot
+                                            ? `<button data-snap="${e.snapshot}" class="btn-hist-detail px-2 py-1 rounded bg-sky-950/60 hover:bg-sky-900/70 text-sky-300 text-[10px] font-medium transition-colors duration-200 cursor-pointer mr-1">Chi tiết</button>`
+                                            : ""}
+                                        ${(e.sent_to || []).length ? e.sent_to.map(t => t === "telegram" ? "Telegram" : "Zalo").join(" + ") : '<span class="text-slate-500">-</span>'}
+                                    </td>
                                 </tr>`).join("")}
                         </tbody>
                     </table>
                     </div>`;
+                box.querySelectorAll(".btn-hist-detail").forEach(btn =>
+                    btn.addEventListener("click", () => showHistoryDetail(btn.dataset.snap)));
             } catch (err) {
                 box.innerHTML = `<p class="text-red-400 text-xs">${err.message}</p>`;
             }
+        }
+
+        /**
+         * Mo modal chi tiet 1 luot lay: danh sach bai viet + tung binh luan
+         * da phan tich (sentiment + do tin cay + to mau tieu cuc).
+         *
+         * Logic:
+         *   - GET /api/history/detail?file=<snapshot> -> {posts, total_*, threshold...}
+         *   - Render tieu de thong tin luot (thoi gian, nguon, ngong, so lieu)
+         *   - Moi bai 1 card: url, badge cam xuc bai viet, noi dung (300 ky tu),
+         *     tung binh luan kem sentiment_vi + % + nen do neu tieu cuc
+         *
+         * @param {string} file - Ten snapshot (fb_analysis_<ts>.json)
+         * @returns {Promise<void>}
+         */
+        async function showHistoryDetail(file) {
+            const modal = document.getElementById("hist-modal");
+            const body = document.getElementById("hist-modal-body");
+            modal.classList.remove("hidden");
+            body.innerHTML = '<p class="text-slate-400">Đang tải chi tiết...</p>';
+            try {
+                const d = await api("/api/history/detail?file=" + encodeURIComponent(file));
+                const fmtEpoch = (v) => v ? new Date(v > 1e12 ? v : v * 1000).toLocaleString("vi-VN") : "-";
+                const sourceBadge = d.source
+                    ? `<span class="px-1.5 py-0.5 rounded bg-rose-950/60 text-rose-300 border border-rose-900 text-[10px] font-medium">${d.source}</span>`
+                    : "";
+                const header = `
+                    <div class="p-3 rounded-lg bg-muted/40 border border-border/60 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-300">
+                        <span>🕒 Lúc lấy: <b>${fmtEpoch(d.collected_at)}</b></span>
+                        ${sourceBadge}
+                        <span>Ngưỡng: <b>${d.threshold != null ? d.threshold.toFixed(0) + "%" : "-"}</b></span>
+                        <span>Bài: <b>${d.total_posts}</b></span>
+                        <span>Bình luận: <b>${d.total_comments}</b></span>
+                        <span class="${d.total_negative > 0 ? "text-red-400" : "text-emerald-400"}">Tiêu cực: <b>${d.total_negative}</b></span>
+                        <span class="${d.total_post_negative > 0 ? "text-red-400" : "text-emerald-400"}">Bài tiêu cực: <b>${d.total_post_negative}</b></span>
+                    </div>`;
+                const cards = (d.posts || []).map(post => {
+                    const postBadge = post.post_sentiment
+                        ? `<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-medium border ${post.post_negative
+                            ? "bg-red-950/70 text-red-300 border-red-900"
+                            : post.post_sentiment_vi === "Tích cực"
+                                ? "bg-emerald-950/70 text-emerald-300 border-emerald-900"
+                                : "bg-muted text-slate-400 border-border"}">Bài viết: ${post.post_sentiment_vi} (${(post.post_confidence * 100).toFixed(0)}%)</span>`
+                        : "";
+                    const comments = (post.comments || []).map(c => `
+                        <div class="rounded-md px-3 py-2 text-[12px] ${c.negative ? "bg-red-950/40 border border-red-900/60" : "bg-muted/50 border border-border/50"}">
+                            <span class="font-semibold ${c.negative ? "text-red-300" : "text-slate-400"}">${c.sentiment_vi}</span>
+                            <span class="text-slate-500">(${(c.confidence * 100).toFixed(0)}%)</span>
+                            <span class="text-slate-300 ml-1">${c.text}</span>
+                        </div>`).join("") || '<p class="text-[11px] text-slate-500">Không có bình luận</p>';
+                    return `
+                        <div class="bg-surface border border-border rounded-lg p-3">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                    <p class="text-[11px] text-slate-500">Bài ${post.index}</p>
+                                    <a href="${post.url}" target="_blank" class="text-sky-400 font-mono text-[11px] break-all hover:underline">${post.url}</a>
+                                    ${postBadge}
+                                </div>
+                            </div>
+                            ${post.text ? `<p class="mt-1 text-slate-300 whitespace-pre-wrap break-words">${post.text.slice(0, 300)}${post.text.length > 300 ? "…" : ""}</p>` : ""}
+                            <div class="mt-2 space-y-1.5">${comments}</div>
+                        </div>`;
+                }).join("");
+                body.innerHTML = header + (cards || '<p class="text-slate-400">Không có bài viết nào.</p>');
+            } catch (err) {
+                body.innerHTML = `<p class="text-red-400 text-xs">${err.message}</p>`;
+            }
+        }
+
+        /**
+         * Dong modal chi tiet lich su.
+         *
+         * @returns {void}
+         */
+        function closeHistoryDetail() {
+            document.getElementById("hist-modal").classList.add("hidden");
         }
 
         // ---------- Hẹn giờ quét tự động ----------
@@ -2284,6 +2379,10 @@ NOI DUNG:
         setInterval(pollScheduleNext, 10000);
         // Lịch sử
         document.getElementById("btn-refresh-history").addEventListener("click", loadHistory);
+        document.getElementById("hist-modal-close").addEventListener("click", closeHistoryDetail);
+        document.getElementById("hist-modal").addEventListener("click", (e) => {
+            if (e.target.id === "hist-modal") closeHistoryDetail();
+        });
 
         loadModelInfo();
         loadTrainConfig();

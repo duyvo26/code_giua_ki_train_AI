@@ -265,6 +265,7 @@ ENDPOINT_DESCRIPTIONS = {
     "/api/keys/revoke": "Xoá API key (POST)",
     "/api/extension/analyze": "Nhận data từ extension: tự phân tích + tự gửi cảnh báo bot (header X-API-Key)",
     "/api/history": "Lịch sử dữ liệu đã lấy (extension + web), mới nhất trước",
+    "/api/history/detail": "Chi tiết bài viết + bình luận đã phân tích của 1 lượt (?file=fb_analysis_*.json)",
     "/api/schedules": "Danh sách lịch hẹn quét tự động",
     "/api/schedules/delete": "Xoá lịch hẹn (POST)",
     "/api/schedules/toggle": "Bật/tắt lịch hẹn (POST)",
@@ -1204,9 +1205,15 @@ def _run_fb_analyze(
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         "done": True,
     }
+    # Snapshot riêng theo từng lượt lấy - để tab Lịch sử xem CHI TIẾT
+    # từng bài viết + bình luận đã phân tích (fb_analysis.json chỉ giữ lượt mới nhất)
+    snapshot_name = f"fb_analysis_{payload['ts'].replace('-', '').replace(':', '').replace(' ', '_')}.json"
     with contextlib.suppress(Exception):
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         (RESULTS_DIR / "fb_analysis.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (RESULTS_DIR / snapshot_name).write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     # Lịch sử "đã lấy": mỗi lượt phân tích ghi 1 bản ghi
@@ -1221,6 +1228,7 @@ def _run_fb_analyze(
                 "post_negative": total_post_negative,
                 "threshold": threshold,
                 "collected_at": collected_at,
+                "snapshot": snapshot_name,
                 "sent_to": [],
                 "urls": [p.get("url", "") for p in posts if p.get("url")][:10],
             }
@@ -1485,6 +1493,30 @@ def history():
     """
     limit = request.args.get("limit", 50, type=int)
     return jsonify({"entries": list_history(limit)})
+
+
+@app.get("/api/history/detail")
+def history_detail():
+    """
+    Chi tiết 1 lượt lấy: danh sách bài viết + bình luận đã phân tích.
+
+    Logic:
+      - Nhận ?file=fb_analysis_<ts>.json (tên snapshot lưu trong lịch sử)
+      - Bảo mật: resolve() tuyệt đối rồi kiểm tra nằm trong RESULTS_DIR
+        (chặn path traversal ../)
+      - Trả nguyên snapshot: posts (text, post_sentiment, comments phân tích...)
+    """
+    filename = (request.args.get("file") or "").strip()
+    if not filename:
+        return jsonify({"error": "Thieu file"}), 400
+    base = RESULTS_DIR.resolve()
+    target = (base / filename).resolve()
+    if not target.is_file() or base not in target.parents:
+        return jsonify({"error": "Khong tim thay snapshot"}), 404
+    try:
+        return jsonify(json.loads(target.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, OSError) as exc:
+        return jsonify({"error": f"Loi doc snapshot: {exc}"}), 500
 
 
 # =====================================================================
