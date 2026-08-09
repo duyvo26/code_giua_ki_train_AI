@@ -271,6 +271,8 @@ ENDPOINT_DESCRIPTIONS = {
     "/api/schedules/toggle": "Bật/tắt lịch hẹn (POST)",
     "/api/schedules/next": "Lịch hẹn đến giờ cần mở tab (web poll, không đổi trạng thái)",
     "/api/schedules/ack": "Đánh dấu lịch đã mở tab thành công (POST)",
+    "/api/bot/config/export": "Xuất toàn bộ cấu hình bot ra file JSON (kèm token thật)",
+    "/api/bot/config/import": "Nạp cấu hình bot từ file JSON đã xuất (POST)",
 }
 
 
@@ -729,6 +731,59 @@ def bot_config_save():
         if bot.is_running and bot_type in data:
             bot.stop()
             notes.append(f"Bot {bot_type} da dung de ap dung cau hinh - bam Bat de chay lai")
+    return jsonify({"ok": True, "config": public_config(), "notes": notes})
+
+
+@app.get("/api/bot/config/export")
+def bot_config_export():
+    """
+    Xuất TOÀN BỘ cấu hình bot (kèm token thật) ra file JSON để backup/nạp lại.
+
+    Logic:
+      - Đọc thẳng từ utils/bot_config.json (không che token như /api/bot/config)
+      - File này là nơi quản lý duy nhất - xuất đúng cấu trúc để import lại được
+    """
+    from flask import Response
+
+    cfg = load_config()
+    data = json.dumps(cfg, ensure_ascii=False, indent=2)
+    return Response(
+        data,
+        mimetype="application/json",
+        headers={"Content-Disposition": "attachment; filename=bot_config.json"},
+    )
+
+
+@app.post("/api/bot/config/import")
+def bot_config_import():
+    """
+    Nạp cấu hình bot từ file JSON đã xuất ({telegram: ..., zalo: ...}).
+
+    Logic:
+      - Chấp nhận payload trực tiếp hoặc {"config": {...}}
+      - Merge qua save_config: token trống KHÔNG ghi đè token cũ
+      - Bot đang chạy -> dừng để áp dụng cấu hình mới
+    """
+    data = request.get_json(silent=True) or {}
+    payload = data.get("config") if isinstance(data.get("config"), dict) else data
+    if not isinstance(payload, dict):
+        return jsonify({"error": "File cau hinh khong hop le"}), 400
+
+    updates = {}
+    for bot_type in ("telegram", "zalo"):
+        fields = payload.get(bot_type)
+        if isinstance(fields, dict):
+            updates[bot_type] = {k: v for k, v in fields.items() if isinstance(v, str)}
+    if not updates:
+        return jsonify({"error": "Khong co du lieu telegram/zalo trong file"}), 400
+
+    save_config(updates)
+    notes = []
+    for bot_type, bot in _BOT_INSTANCES.items():
+        if bot.is_running and bot_type in updates:
+            bot.stop()
+            notes.append(f"Bot {bot_type} da dung de ap dung cau hinh - bam Bat de chay lai")
+    _append_log(f"NAP CAU HINH BOT TU FILE: {', '.join(updates.keys())}", "INFO")
     return jsonify({"ok": True, "config": public_config(), "notes": notes})
 
 

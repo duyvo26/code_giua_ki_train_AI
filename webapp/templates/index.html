@@ -271,6 +271,27 @@
     <div id="tab-bots" class="hidden">
     <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
 
+        <section class="bg-surface border border-border rounded-xl p-5">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 class="font-semibold mb-1 flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-indigo-400"></span> Sao lưu cấu hình bot
+                    </h2>
+                    <p class="text-[12px] text-slate-400 leading-relaxed">
+                        Xuất toàn bộ cấu hình (token Telegram/Zalo, chat_id, api_base) ra file JSON
+                        để backup hoặc nạp lại nhanh trên máy khác.
+                    </p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button id="btn-export-bot"
+                            class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold transition-colors duration-200 cursor-pointer">Xuất cấu hình</button>
+                    <button id="btn-import-bot"
+                            class="px-4 py-2 rounded-md bg-muted hover:bg-slate-700/70 text-xs font-medium transition-colors duration-200 cursor-pointer">Nạp file cấu hình</button>
+                    <input id="bot-config-file" type="file" accept=".json,application/json" class="hidden">
+                </div>
+            </div>
+        </section>
+
         <div class="grid lg:grid-cols-2 gap-6">
 
             <!-- Card Telegram -->
@@ -1391,6 +1412,81 @@ NOI DUNG:
         }
 
         // ---------- Tab: Bots ----------
+        /**
+         * Xuat toan bo cau hinh bot (kem token that) ra file JSON de backup.
+         *
+         * Logic:
+         *   - GET /api/bot/config/export -> JSON day du (khong che token)
+         *   - Tao Blob + a.download="bot_config.json" de tai ve may
+         *
+         * @returns {Promise<void>}
+         */
+        async function exportBotConfig() {
+            const cfg = await api("/api/bot/config/export");
+            const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "bot_config.json";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        /**
+         * Mo hop thoai chon file de nap cau hinh bot.
+         *
+         * @returns {void}
+         */
+        function importBotConfig() {
+            document.getElementById("bot-config-file").click();
+        }
+
+        /**
+         * Xu ly file cau hinh bot duoc chon: parse JSON -> gui len web.
+         *
+         * Logic:
+         *   - Doc file text, JSON.parse (loi -> alert ro rang)
+         *   - POST /api/bot/config/import -> web merge (token trong khong ghi de)
+         *     + dung bot dang chay de ap dung
+         *   - Tai lai form cau hinh + hien ghi chu (bot da dung thi bao)
+         *
+         * @param {Event} event - Su kien change cua input file
+         * @returns {Promise<void>}
+         */
+        async function onBotConfigFileSelected(event) {
+            const file = event.target.files && event.target.files[0];
+            event.target.value = ""; // cho phep chon lai cung file
+            if (!file) return;
+            let text;
+            try {
+                text = await file.text();
+            } catch (err) {
+                alert("Loi doc file: " + err.message);
+                return;
+            }
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch (err) {
+                alert("File khong phai JSON hop le: " + err.message);
+                return;
+            }
+            try {
+                const res = await api("/api/bot/config/import", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(parsed),
+                });
+                const notes = (res.notes || []).join("\n");
+                alert(notes || "Da nap cau hinh bot tu file thanh cong.");
+                await loadBotConfig();
+            } catch (err) {
+                alert("Loi nap cau hinh: " + err.message);
+            }
+        }
+
         const BOT_LOGS_SINCE = { telegram: 0, zalo: 0 };
         let botLogPoll = null;
         // Config bot lưu THÊM ở trình duyệt (localStorage) - không mất khi
@@ -2389,6 +2485,9 @@ NOI DUNG:
         });
         // Bots
         document.getElementById("tg-save").addEventListener("click", () => saveBot("tg"));
+        document.getElementById("btn-export-bot").addEventListener("click", exportBotConfig);
+        document.getElementById("btn-import-bot").addEventListener("click", importBotConfig);
+        document.getElementById("bot-config-file").addEventListener("change", onBotConfigFileSelected);
         document.getElementById("tg-check").addEventListener("click", () => checkBot("tg"));
         document.getElementById("tg-test").addEventListener("click", () => checkBot("tg"));
         document.getElementById("tg-start").addEventListener("click", () => toggleBot("tg", "start"));
