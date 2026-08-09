@@ -49,12 +49,37 @@ from webapp.bots.config_manager import load_config, public_config, save_config  
 from webapp.bots.telegram_bot import TelegramBot  # noqa: E402
 from webapp.bots.zalo_bot import ZaloBot  # noqa: E402
 
+# API key cho extension gửi data về web (utils/api_keys.json, gitignored)
+from webapp.api_keys import (  # noqa: E402
+    generate_api_key,
+    is_valid_api_key,
+    list_keys,
+    revoke_api_key,
+)
+
 # Trainer v5 yêu cầu callback kế thừa TrainerCallback, nếu không sẽ
 # AttributeError on_init_end khi Trainer gọi các hook (lỗi đã gặp khi
 # dùng class trần trong nút Train của web)
 from transformers import TrainerCallback  # noqa: E402
 
 app = Flask(__name__)
+
+
+@app.after_request
+def _add_cors_headers(response):
+    """
+    CORS toàn cục: cho phép extension (popup fetch cross-origin) gọi API.
+
+    Logic:
+      - Origin "*" vì web chạy qua Cloudflared tunnel, extension cấu hình
+        URL tuỳ biến (chrome-extension://... là origin khác web)
+      - X-API-Key là header tuỳ biến nên phải khai Allow-Headers
+        (nếu không trình duyệt chặn preflight OPTIONS)
+    """
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Key"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return response
 
 # Trạng thái train toàn cục, web poll /api/train-status mỗi 3 giây
 TRAIN_STATE = {"running": False, "done": False, "message": "idle", "epoch": 0}
@@ -218,6 +243,10 @@ ENDPOINT_DESCRIPTIONS = {
     "/api/train-status": "Trạng thái huấn luyện - frontend poll",
     "/api/train-log": "Log huấn luyện tăng dần (GET ?since=N)",
     "/api/endpoints": "Danh sách API của hệ thống",
+    "/api/keys": "Danh sách API key (tab Cấu hình API Key)",
+    "/api/keys/generate": "Sinh API key mới (POST)",
+    "/api/keys/revoke": "Xoá API key (POST)",
+    "/api/extension/analyze": "Nhận data từ extension: tự phân tích + tự gửi cảnh báo bot (header X-API-Key)",
 }
 
 
@@ -867,6 +896,110 @@ def _validate_negative_threshold(value) -> float:
     return num
 
 
+def _find_negative_posts(analysis: dict, threshold: float) -> list[dict]:
+    """
+    Lọc bài có bình luận tiêu cực >= ngưỡng từ kết quả phân tích.
+
+    Logic:
+      - Duyệt từng bài, giữ bình luận co Negative prob >= threshold/100
+      - Chi giu bai co it nhat 1 binh luan tieu cuc
+
+    Args:
+        analysis (dict): Ket qua fb_analysis.json ({posts: [...]})
+        threshold (float): Nguong tieu cuc phan tram (0-100)
+
+    Returns:
+        list[dict]: [{"post": post, "neg_comments": [...]}]
+    """
+    negative_posts = []
+    for post in analysis.get("posts", []):
+        neg_comments = [
+            c
+            for c in post.get("comments", [])
+            if (c.get("probabilities") or {}).get("Negative", 0) >= threshold / 100
+        ]
+        if neg_comments:
+            negative_posts.append({"post": post, "neg_comments": neg_comments})
+    return negative_posts
+
+
+def _build_notify_message(negative_posts: list[dict]) -> str:
+    """
+    Dựng nội dung tin cảnh báo từ danh sách bài có bình luận tiêu cực.
+
+    Logic:
+      - Moi bai 1 dong: so thu tu + url + so binh luan tieu cuc
+      - Kem danh sach binh luan tieu cuc (text 150 ky tu + do tin cay %)
+
+    Args:
+        negative_posts (list[dict]): Ket qua _find_negative_posts
+
+    Returns:
+        str: Noi dung tin nhan canh bao
+    """
+    lines = []
+    for item in negative_posts:
+        post = item["post"]
+        neg_comments = item["neg_comments"]
+        lines.append(
+            f"- Bai {post['index']} ({post['url']}): {len(neg_comments)} binh luan tieu cuc\n"
+            + "\n".join(
+                f"   + {c['text'][:150]} (Do tin cay: {c['confidence']:.0%})"
+                for c in neg_comments
+            )
+        )
+    return "CANH BAO: Co binh luan TIEU CUC tren bai viet Facebook:\n" + "\n".join(lines)
+
+
+def _send_alert_to_bots(analysis: dict, threshold: float) -> list[str]:
+    """
+    Tự gửi cảnh báo qua các bot ĐÃ CẤU HÌNH (token + chat_id).
+
+    Logic:
+      - Kiem tra lan luot telegram + zalo qua load_config()
+      - Bot nao co token + chat_id thi gui tin canh bao (chunk 4000 ky tu)
+      - Bot chua cau hinh -> bo qua (log ghi ro)
+      - Khong co bai tieu cuc -> khong gui
+
+    Args:
+        analysis (dict): Ket qua fb_analysis.json
+        threshold (float): Nguong tieu cuc phan tram (0-100)
+
+    Returns:
+        list[str]: Danh sach loai bot da gui thanh cong (vd ["telegram"])
+    """
+    from webapp.bots.common import chunk_text
+
+    negative_posts = _find_negative_posts(analysis, threshold)
+    if not negative_posts:
+        _append_log("Khong co bai nao co binh luan tieu cuc - khong can gui bot", "INFO")
+        return []
+
+    message = _build_notify_message(negative_posts)
+    cfg = load_config()
+    sent_to: list[str] = []
+    for bot_type, bot in _BOT_INSTANCES.items():
+        bot_cfg = cfg.get(bot_type) or {}
+        chat_id = str(bot_cfg.get("chat_id") or "").strip()
+        if not (bot_cfg.get("token", "").strip() and chat_id):
+            _append_log(f"[bot] Bot {bot_type} chua cau hinh token/chat_id - bo qua", "INFO")
+            continue
+        ok = False
+        for chunk in chunk_text(message, max_chars=4000):
+            ok = bot.send(chat_id, chunk) or ok
+            time.sleep(0.3)
+        if ok:
+            sent_to.append(bot_type)
+            _append_log(
+                f"[bot] Da gui canh bao {len(negative_posts)} bai tieu cuc "
+                f"(nguong {threshold:.0f}%) qua {bot_type}",
+                "INFO",
+            )
+        else:
+            _append_log(f"[bot] Gui canh bao qua {bot_type} that bai - xem log bot", "ERROR")
+    return sent_to
+
+
 def _run_fb_analyze(posts, model, tokenizer, threshold: float) -> None:
     """Thread nền: phân tích từng bình luận, lưu fb_analysis.json + log."""
     _append_log(f"=== BAT DAU PHAN TICH BINH LUAN FACEBOOK (nguong {threshold:.0f}%) ===", "INFO")
@@ -948,15 +1081,7 @@ def fb_posts_notify():
     threshold = _validate_negative_threshold(
         data.get("threshold", analysis.get("threshold"))
     )
-    negative_posts = []
-    for post in analysis.get("posts", []):
-        neg_comments = [
-            c
-            for c in post.get("comments", [])
-            if (c.get("probabilities") or {}).get("Negative", 0) >= threshold / 100
-        ]
-        if neg_comments:
-            negative_posts.append({"post": post, "neg_comments": neg_comments})
+    negative_posts = _find_negative_posts(analysis, threshold)
     if not negative_posts:
         return jsonify({
             "ok": True,
@@ -977,17 +1102,7 @@ def fb_posts_notify():
 
     from webapp.bots.common import chunk_text
 
-    lines = []
-    for item in negative_posts:
-        post = item["post"]
-        neg_comments = item["neg_comments"]
-        lines.append(
-            f"- Bai {post['index']} ({post['url']}): {len(neg_comments)} binh luan tieu cuc\n"
-            + "\n".join(
-                f"   + {c['text'][:150]} (Do tin cay: {c['confidence']:.0%})" for c in neg_comments
-            )
-        )
-    message = "CANH BAO: Co binh luan TIEU CUC tren bai viet Facebook:\n" + "\n".join(lines)
+    message = _build_notify_message(negative_posts)
     sent = False
     for chunk in chunk_text(message, max_chars=4000):
         sent = bot.send(chat_id, chunk) or sent
@@ -999,6 +1114,164 @@ def fb_posts_notify():
         "ok": True,
         "message": f"Da gui canh bao {len(negative_posts)} bai (nguong {threshold:.0f}%) qua {bot_type}",
     })
+
+
+# =====================================================================
+# API Key - cấu hình cho extension gửi data về web (không login)
+# =====================================================================
+
+@app.get("/api/keys")
+def api_keys_list():
+    """
+    Danh sách API key đã sinh (mở hoàn toàn - không login, web demo qua tunnel).
+    """
+    return jsonify({"keys": list_keys()})
+
+
+@app.post("/api/keys/generate")
+def api_keys_generate():
+    """
+    Sinh 1 API key mới.
+
+    Logic:
+      - Nhận {name} tuỳ chọn (nhận diện key, mặc định "extension")
+      - Key sinh bằng secrets (32 ký tự), lưu vào utils/api_keys.json
+    """
+    data = request.get_json(silent=True) or {}
+    entry = generate_api_key(data.get("name", ""))
+    return jsonify(
+        {
+            "ok": True,
+            "key": entry["key"],
+            "name": entry["name"],
+            "created_at": entry["created_at"],
+        }
+    )
+
+
+@app.post("/api/keys/revoke")
+def api_keys_revoke():
+    """
+    Xoá 1 API key khỏi danh sách.
+    """
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not key:
+        return jsonify({"error": "Thieu key"}), 400
+    if revoke_api_key(key):
+        return jsonify({"ok": True})
+    return jsonify({"error": "Khong tim thay key"}), 404
+
+
+# =====================================================================
+# Extension - nhận data từ Chrome extension, tự phân tích + tự gửi bot
+# =====================================================================
+
+@app.route("/api/extension/analyze", methods=["POST", "OPTIONS"])
+def extension_analyze():
+    """
+    Nhận data từ extension: tự phân tích cảm xúc + TỰ gửi cảnh báo bot.
+
+    Logic:
+      - Yêu cầu header X-API-Key hợp lệ (không có -> 401)
+      - Body nhận {posts: [...]} (extension gửi sau khi scan)
+        hoặc {text} (dán txt/json như tab FB)
+      - Map posts extension ({url, postText, comments}) -> dạng chuẩn
+        ({index, url, text, comments}) rồi chạy thread nền phân tích
+      - Thread nền: phân tích cảm xúc (reuse _run_fb_analyze) -> lưu
+        fb_analysis.json -> _send_alert_to_bots() gửi tới mọi bot
+        đã cấu hình (telegram/zalo)
+      - Trả ngay {ok, message} - không đợi phân tích xong
+    """
+    if request.method == "OPTIONS":
+        return "", 204  # CORS preflight - không cần API key
+
+    api_key = request.headers.get("X-API-Key", "")
+    if not is_valid_api_key(api_key):
+        return jsonify({"error": "API key khong hop le - xem tab Cau hinh API Key tren web"}), 401
+
+    data = request.get_json(silent=True) or {}
+    if (data.get("text") or "").strip():
+        from webapp.fb_data_parser import parse_fb_data
+
+        parsed = parse_fb_data(data["text"])
+    elif isinstance(data.get("posts"), list) and data["posts"]:
+        posts = []
+        for index, post in enumerate(data["posts"], start=1):
+            if not isinstance(post, dict):
+                continue
+            posts.append(
+                {
+                    "index": index,
+                    "url": str(post.get("url") or "").strip(),
+                    "text": str(post.get("postText") or post.get("text") or "").strip(),
+                    "comments": [
+                        str(c) for c in (post.get("comments") or []) if str(c).strip()
+                    ],
+                }
+            )
+        parsed = {"posts": posts, "warnings": []}
+    else:
+        return jsonify({"error": "Chua co du lieu - gui {posts} hoac {text}"}), 400
+
+    posts = parsed.get("posts") or []
+    if not posts:
+        return jsonify(
+            {"error": "Khong co bai viet nao de phan tich", "warnings": parsed.get("warnings", [])}
+        ), 400
+
+    try:
+        from scripts.finetune import load_sentiment_model
+
+        model, tokenizer = load_sentiment_model()
+    except OSError as exc:
+        return jsonify({"error": f"Chua co model: {exc}. Hay bam Train truoc."}), 500
+
+    threshold = _validate_negative_threshold(data.get("threshold"))
+
+    analyze_thread = threading.Thread(
+        target=_run_extension_analyze,
+        args=(posts, model, tokenizer, threshold),
+        daemon=True,
+    )
+    analyze_thread.start()
+
+    total_comments = sum(len(p["comments"]) for p in posts)
+    return jsonify(
+        {
+            "ok": True,
+            "message": (
+                f"Da nhan {len(posts)} bai ({total_comments} binh luan) - "
+                "dang phan tich va tu gui canh bao bot..."
+            ),
+            "received_posts": len(posts),
+            "received_comments": total_comments,
+        }
+    )
+
+
+def _run_extension_analyze(posts, model, tokenizer, threshold: float) -> None:
+    """
+    Thread nền của /api/extension/analyze: phân tích -> lưu -> tự gửi bot.
+
+    Logic:
+      - B1: _run_fb_analyze() phân tích từng bình luận, lưu fb_analysis.json
+      - B2: đọc lại kết quả, gọi _send_alert_to_bots() tới mọi bot đã cấu hình
+    """
+    _append_log(
+        f"=== EXTENSION: nhan {len(posts)} bai, dang phan tich (nguong {threshold:.0f}%)... ===",
+        "INFO",
+    )
+    _run_fb_analyze(posts, model, tokenizer, threshold)
+    try:
+        analysis_file = RESULTS_DIR / "fb_analysis.json"
+        if analysis_file.exists():
+            analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
+            sent_to = _send_alert_to_bots(analysis, threshold)
+            if sent_to:
+                _append_log(f"EXTENSION XONG: da tu gui canh bao qua: {', '.join(sent_to)}", "INFO")
+    except Exception as exc:  # noqa: BLE001 - lỗi gửi bot không dừng luồng
+        _append_log(f"LOI tu gui canh bao bot: {exc}", "ERROR")
 
 
 if __name__ == "__main__":

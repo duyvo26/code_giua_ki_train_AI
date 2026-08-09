@@ -12,6 +12,9 @@ results/
 # Bí mật - token bot không bao giờ commit
 utils/bot_config.json
 
+# Bí mật - API key extension không bao giờ commit
+utils/api_keys.json
+
 # Môi trường
 .venv/
 venv/

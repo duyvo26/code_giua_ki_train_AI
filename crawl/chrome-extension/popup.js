@@ -2,18 +2,24 @@
  * Popup: hien thi ket qua + dieu khien quet.
  *   - Nut "Quet ngay" -> gui AUTO_SCAN toi content script: tu cuon trang
  *     thu thap CONG DON (loc trung), nhan tien trinh qua FB_SCAN_PROGRESS.
- *   - Hien danh sach bai viet co binh luan cong khai (url + trang thai).
- *   - Nut tai file fb_posts_content.txt.
+ *   - Sau khi quet xong: gui danh sach bai ve web (/api/extension/analyze)
+ *     kem API key - web tu phan tich cam xuc + tu gui canh bao bot.
+ *   - Cau hinh web (URL + API key) bat buoc truoc khi quet.
  */
 
 const STORAGE_KEY = "fb_posts";
 const POST_COUNT_KEY = "fb_post_count";
 const LOAD_WAIT_KEY = "fb_load_wait";
+const WEB_URL_KEY = "fb_web_url";
+const API_KEY_KEY = "fb_api_key";
 
 const buttonDownload = document.getElementById("download");
 const buttonScan = document.getElementById("scan");
+const buttonSaveConfig = document.getElementById("saveConfig");
 const countInput = document.getElementById("postCount");
 const loadWaitInput = document.getElementById("loadWait");
+const webUrlInput = document.getElementById("webUrl");
+const apiKeyInput = document.getElementById("apiKey");
 const statusEl = document.getElementById("status");
 const resultEl = document.getElementById("result");
 
@@ -180,7 +186,53 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
+/**
+ * Gui danh sach bai viet ve web /api/extension/analyze kem API key.
+ *
+ * Logic:
+ *   - POST JSON {posts} + header X-API-Key (web bat buoc kiem tra)
+ *   - Web tra ngay {ok, message, received_posts} - phan tich chay thread nen
+ *   - Loi HTTP (401 key sai, 500 chua train model...) -> throw Error(message)
+ *
+ * @param {Array} posts - Danh sach bai tu AUTO_SCAN ({url, postText, comments})
+ * @returns {Promise<Object>} Phan hoi tu web
+ */
+async function sendToWeb(posts) {
+  const webUrl = webUrlInput.value.trim().replace(/\/+$/, "");
+  const apiKey = apiKeyInput.value.trim();
+  const resp = await fetch(webUrl + "/api/extension/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+    body: JSON.stringify({ posts }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || ("HTTP " + resp.status));
+  return data;
+}
+
+buttonSaveConfig.addEventListener("click", () => {
+  const webUrl = webUrlInput.value.trim();
+  const apiKey = apiKeyInput.value.trim();
+  if (!webUrl) {
+    setStatus("Nhap URL web truoc (vd https://xxx.trycloudflare.com).", "error");
+    return;
+  }
+  chrome.storage.local.set({ [WEB_URL_KEY]: webUrl, [API_KEY_KEY]: apiKey }).then(() => {
+    setStatus("Da luu cau hinh web. Bam Quet ngay de bat dau.", "ok");
+  });
+});
+
 buttonScan.addEventListener("click", async () => {
+  const webUrl = webUrlInput.value.trim();
+  const apiKey = apiKeyInput.value.trim();
+  if (!webUrl) {
+    setStatus("Cau hinh URL web truoc khi quet (o phia tren).", "error");
+    return;
+  }
+  if (!apiKey) {
+    setStatus("Thieu API key - lay tu web (tab Cau hinh API Key).", "error");
+    return;
+  }
   buttonScan.disabled = true;
   setStatus("Dang cuon & thu thap...", "ok");
   try {
@@ -197,14 +249,7 @@ buttonScan.addEventListener("click", async () => {
     }
     const limit = parseInt(countInput.value, 10) || 5;
     const resp = await chrome.tabs.sendMessage(tab.id, { type: "AUTO_SCAN", limit });
-    if (resp && resp.count > 0) {
-      setStatus(
-        "Group " + (resp.groupId || "?") + ": xong - " + resp.count + " bai (" +
-        resp.totalComments + " binh luan). Ngung: " + resp.stopped +
-        " sau " + resp.scrolls + " lan cuon. Da luu cong don.",
-        "ok"
-      );
-    } else {
+    if (!resp || resp.count === 0) {
       const dbg = (resp && resp.debug) || {};
       setStatus(
         "Quet xong: KHONG co bai nao co binh luan cong khai." +
@@ -214,7 +259,24 @@ buttonScan.addEventListener("click", async () => {
         " containers=" + dbg.containers + " mountPath=" + dbg.mountFound + "]",
         "error"
       );
+      return;
     }
+    setStatus("Quet xong " + resp.count + " bai - dang gui ve web...", "ok");
+    let sent;
+    try {
+      sent = await sendToWeb(resp.posts);
+    } catch (err) {
+      setStatus(
+        "Quet xong " + resp.count + " bai (da luu) NHUNG gui web LOI: " + err.message,
+        "error"
+      );
+      return;
+    }
+    setStatus(
+      "Web da nhan " + (sent.received_posts || resp.count) + " bai - " +
+      (sent.message || "dang phan tich + tu gui canh bao bot..."),
+      "ok"
+    );
   } catch (err) {
     setStatus("Loi quet: " + err.message, "error");
   } finally {
@@ -246,8 +308,10 @@ loadWaitInput.addEventListener("change", () => {
   });
 });
 
-chrome.storage.local.get([STORAGE_KEY, POST_COUNT_KEY, LOAD_WAIT_KEY]).then((data) => {
+chrome.storage.local.get([STORAGE_KEY, POST_COUNT_KEY, LOAD_WAIT_KEY, WEB_URL_KEY, API_KEY_KEY]).then((data) => {
   if (data[POST_COUNT_KEY]) countInput.value = data[POST_COUNT_KEY];
   if (data[LOAD_WAIT_KEY]) loadWaitInput.value = data[LOAD_WAIT_KEY];
+  if (data[WEB_URL_KEY]) webUrlInput.value = data[WEB_URL_KEY];
+  if (data[API_KEY_KEY]) apiKeyInput.value = data[API_KEY_KEY];
   refreshFromStorage();
 });

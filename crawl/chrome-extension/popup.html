@@ -36,12 +36,17 @@
 </head>
 <body>
   <h1>FB Group URL Grabber</h1>
-  <div id="hint">Bam "Quet ngay" -> tu dong cuon trang, thu thap cong don (loc trung, khong mat bai cu).</div>
+  <div id="hint">Bam "Quet ngay" -> tu dong cuon trang, thu thap cong don (loc trung, khong mat bai cu) roi gui ve web de tu phan tich + gui canh bao bot.</div>
   <label for="postCount">So bai co binh luan cong khai can tim:</label>
   <input type="number" id="postCount" min="1" max="50" value="5">
   <label for="loadWait">Thoi gian cho load moi lan cuon (ms):</label>
   <input type="number" id="loadWait" min="500" max="10000" step="500" value="3000">
-  <button id="scan">Quet ngay (tab group dang mo)</button>
+  <label for="webUrl">URL web (bat buoc de quet):</label>
+  <input type="text" id="webUrl" placeholder="https://xxx.trycloudflare.com">
+  <label for="apiKey">API key (lay tu web - tab Cau hinh API Key):</label>
+  <input type="password" id="apiKey" placeholder="32 ky tu tu tab Cau hinh API Key">
+  <button id="saveConfig" class="secondary">Luu cau hinh web</button>
+  <button id="scan">Quet ngay + gui ve web</button>
   <div id="status">Chua co du lieu. Mo trang group bat ky.</div>
   <div id="result"></div>
   <button id="download" class="secondary" disabled>Tai file fb_posts_content.txt</button>
