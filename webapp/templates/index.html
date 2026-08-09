@@ -2153,7 +2153,11 @@ NOI DUNG:
                                     <td class="py-2 pr-3 text-slate-300 whitespace-nowrap">${fmtInterval(s)}</td>
                                     <td class="py-2 pr-3 text-slate-300 whitespace-nowrap">${s.post_limit ? s.post_limit + " bài" : '<span class="text-slate-500">mặc định</span>'}</td>
                                     <td class="py-2 pr-3 text-slate-400 whitespace-nowrap">${s.last_run || "-"}</td>
-                                    <td class="py-2 pr-3 text-slate-300 whitespace-nowrap">${s.next_run || "-"}</td>
+                                    <td class="py-2 pr-3 text-slate-300 whitespace-nowrap">
+                                        ${s.enabled
+                                            ? `<span class="sch-countdown text-cyan-300 font-semibold" data-next="${s.next_run_at || 0}" title="Kế tiếp: ${s.next_run || "-"}">--</span>`
+                                            : '<span class="text-slate-500">tắt</span>'}
+                                    </td>
                                     <td class="py-2 text-right whitespace-nowrap">
                                         <button data-url="${encodeURIComponent(s.url)}" data-postget="${s.post_limit || ""}"
                                             class="btn-sch-run px-2 py-1 rounded bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-300 text-[10px] font-medium transition-colors duration-200 cursor-pointer">Chạy ngay</button>
@@ -2172,9 +2176,46 @@ NOI DUNG:
                     btn.addEventListener("click", () => deleteSchedule(btn.dataset.del)));
                 box.querySelectorAll(".btn-sch-run").forEach(btn =>
                     btn.addEventListener("click", () => runScheduleNow(btn.dataset.url, btn.dataset.postget)));
+                tickCountdowns(); // hien dem nguoc ngay khi render xong
             } catch (err) {
                 box.innerHTML = `<p class="text-red-400 text-xs">${err.message}</p>`;
             }
+        }
+
+        /**
+         * Dem nguoc thoi gian toi lan chay ke tiep cua tung lich hen.
+         *
+         * Logic:
+         *   - Duyet toan bo .sch-countdown (co data-next = epoch seconds)
+         *   - Cap nhat moi giay: "2 gio 5 phut" / "5 phut 30 giay" / "30 giay"
+         *   - Den gio -> "Đang chạy..." (poll /api/schedules/next se mo tab)
+         *   - Hien "tắt" neu lich bi disable (khong co span)
+         *
+         * @returns {void}
+         */
+        function tickCountdowns() {
+            document.querySelectorAll(".sch-countdown").forEach((el) => {
+                const nextMs = parseFloat(el.dataset.next) * 1000;
+                if (!nextMs) {
+                    el.textContent = "-";
+                    return;
+                }
+                let diff = Math.floor((nextMs - Date.now()) / 1000);
+                if (diff <= 0) {
+                    el.textContent = "Đang chạy...";
+                    return;
+                }
+                const days = Math.floor(diff / 86400); diff %= 86400;
+                const hours = Math.floor(diff / 3600); diff %= 3600;
+                const mins = Math.floor(diff / 60);
+                const secs = diff % 60;
+                let text;
+                if (days > 0) text = days + " ngày " + hours + " giờ";
+                else if (hours > 0) text = hours + " giờ " + mins + " phút";
+                else if (mins > 0) text = mins + " phút " + secs + " giây";
+                else text = secs + " giây";
+                el.textContent = text;
+            });
         }
 
         /**
@@ -2375,6 +2416,8 @@ NOI DUNG:
         document.getElementById("btn-gen-key").addEventListener("click", generateApiKey);
         // Hẹn giờ quét tự động
         document.getElementById("btn-add-schedule").addEventListener("click", addSchedule);
+        // Đếm ngược lịch hẹn mỗi giây
+        setInterval(tickCountdowns, 1000);
         // Poll lịch hẹn mỗi 10s - chạy toàn trang, không phụ thuộc tab đang mở
         setInterval(pollScheduleNext, 10000);
         // Lịch sử
