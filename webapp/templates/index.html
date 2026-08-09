@@ -435,6 +435,17 @@ NOI DUNG:
         let logPoll = null;
         let trainPoll = null;
 
+        /**
+         * Goi API backend va tra JSON; loi HTTP thi throw Error(message).
+         *
+         * Logic:
+         *   - fetch(url, options) -> neu !res.ok doc body error de hien thi
+         *   - Tra res.json() cho cac ham goi
+         *
+         * @param {string} url - Duong dan API (vd /api/predict)
+         * @param {Object} [options] - Options cua fetch (method, headers, body)
+         * @returns {Promise<Object>} JSON tra ve tu server
+         */
         async function api(url, options = {}) {
             const res = await fetch(url, options);
             if (!res.ok) {
@@ -444,7 +455,17 @@ NOI DUNG:
             return res.json();
         }
 
-        // ---------- KPI + Thông tin model ----------
+        /**
+         * Tai thong tin model + metrics -> cap nhat 4 KPI card va box model.
+         *
+         * Logic:
+         *   - /api/model-info tra {exists, model, metrics}
+         *   - Chua co model -> hien badge do + huong dan bam Train
+         *   - Co model -> do KPI tu metrics (chua co metrics hien N/A)
+         *   - Render grid thong tin model (model goc, so nhan, acc/F1...)
+         *
+         * @returns {Promise<void>}
+         */
         async function loadModelInfo() {
             const box = document.getElementById("model-info");
             const badge = document.getElementById("model-badge");
@@ -501,6 +522,16 @@ NOI DUNG:
             { key: "seed",         label: "Seed",            step: 1,      min: 0,  max: 2147483647 },
         ];
 
+        /**
+         * Sinh HTML 1 truong nhap tham so train (label + input number).
+         *
+         * Logic:
+         *   - Input co id "p-<key>" de collectTrainParams doc lai
+         *   - Gioi han min/max/step theo dinh nghia PARAM_FIELDS
+         *
+         * @param {Object} f - Dinh nghia truong (key, label, step, min, max)
+         * @returns {string} HTML cua truong nhap
+         */
         function fieldInput(f) {
             return `
                 <div>
@@ -510,6 +541,17 @@ NOI DUNG:
                 </div>`;
         }
 
+        /**
+         * Tai tham so train mac dinh + kich thuoc dataset -> render form.
+         *
+         * Logic:
+         *   - /api/train-config tra cau hinh tu scripts/config.py (nguon duy nhat)
+         *   - Render model goc + optimizer/FP16 (codinh), 7 truong nhap,
+         *     va kich thuoc train/valid/test
+         *   - Gan gia tri mac dinh vao tung input (warmup do theo %)
+         *
+         * @returns {Promise<void>}
+         */
         async function loadTrainConfig() {
             const box = document.getElementById("train-params");
             try {
@@ -541,6 +583,15 @@ NOI DUNG:
             }
         }
 
+        /**
+         * Thu thap tham so nguoi dung nhap tu cac input -> object gui len server.
+         *
+         * Logic:
+         *   - Doc tung truong theo PARAM_FIELDS, parseFloat; gia tri NaN -> null
+         *   - Truong dang % (warmup_ratio) chia 100 truoc khi gui
+         *
+         * @returns {Object} {epochs, learning_rate, batch_size, max_len, warmup_ratio, weight_decay, seed}
+         */
         function collectTrainParams() {
             const raw = {};
             PARAM_FIELDS.forEach(f => {
@@ -552,7 +603,18 @@ NOI DUNG:
             return raw;
         }
 
-        // ---------- Phân tích dữ liệu ----------
+        /**
+         * Tai phan tich du lieu UIT-VSFC -> render 5 buoc (data goc, tien xu ly,
+         * label mapping, tokenization, chia du lieu).
+         *
+         * Logic:
+         *   - /api/data-info tra stats/samples/mapping/distribution/split/tokenization
+         *   - Dung cung logic preprocess cua pipeline nen so lieu khop 100%
+         *   - Tokenization: token chips + input_ids + thong ke 300 cau
+         *   - Chua co du lieu -> hien ghi chu (chay Train truoc)
+         *
+         * @returns {Promise<void>}
+         */
         async function loadDataInfo() {
             const box = document.getElementById("data-info");
             try {
@@ -701,7 +763,16 @@ NOI DUNG:
             }
         }
 
-        // ---------- Train + Log ----------
+        /**
+         * Render 4 phase chips tien trinh train (Du lieu/Tokenize/Fine-tune/Danh gia).
+         *
+         * Logic:
+         *   - i < activeIndex -> done (xanh + dau ✓)
+         *   - i === activeIndex -> active (vang + animate-pulse)
+         *   - i > activeIndex -> todo (mo nhat)
+         *
+         * @param {number} activeIndex - Index phase dang chay (0-3)
+         */
         function setPhase(activeIndex) {
             document.getElementById("phase-chips").innerHTML = PHASES.map((p, i) => {
                 const state = i < activeIndex ? "done" : (i === activeIndex ? "active" : "todo");
@@ -713,6 +784,17 @@ NOI DUNG:
             }).join("");
         }
 
+        /**
+         * Bat dau train lai: POST /api/train voi tham so da nhap.
+         *
+         * Logic:
+         *   - Thu thap params, khoa nut Train, hien note dang khoi dong
+         *   - POST len /api/train (server chay thread nen khong treo web)
+         *   - Thanh cong: hien vung trang thai, bat 2 poll (status 3s, log 2s)
+         *   - Loi (vd dang train roi) -> hien message, mo khoa nut
+         *
+         * @returns {Promise<void>}
+         */
         async function startTrain() {
             const btn = document.getElementById("btn-train");
             const note = document.getElementById("train-note");
@@ -736,6 +818,18 @@ NOI DUNG:
             }
         }
 
+        /**
+         * Poll trang thai train (3s/lan) -> cap nhat progress bar + phase chips.
+         *
+         * Logic:
+         *   - /api/train-status tra {running, done, message, epoch, total_epochs}
+         *   - Dang chay: pct = epoch/total_epochs (dung so nguoi dung nhap)
+         *   - Xong: progress 100%, tai lai model-info + data-info + train-config
+         *     de cap nhat metrics/dataset moi; dung ca 2 poll
+         *   - Loi: hien message do, dung poll, mo khoa nut Train
+         *
+         * @returns {Promise<void>}
+         */
         async function pollTrainStatus() {
             const status = await api("/api/train-status");
             const msg = document.getElementById("train-message");
@@ -768,6 +862,16 @@ NOI DUNG:
             }
         }
 
+        /**
+         * Poll log train tang dan (2s/lan) -> append vao panel terminal.
+         *
+         * Logic:
+         *   - since = id dong cuoi da nhan -> chi nhan dong moi
+         *   - To mau theo level: INFO xam / EPOCH xanh la / ERROR do
+         *   - Tu dong cuon xuong cuoi panel
+         *
+         * @returns {Promise<void>}
+         */
         async function pollLog() {
             const data = await api("/api/train-log?since=" + logSince);
             if (!data.lines.length) return;
@@ -787,6 +891,14 @@ NOI DUNG:
         // ---------- Dự đoán ----------
         const EXAMPLES = ["Sản phẩm rất tệ!", "Giao hàng nhanh, đóng gói cẩn thận", "Chất lượng tạm được", "Giảng viên nhiệt tình, dễ hiểu"];
 
+        /**
+         * Render cac chip vi du cau binh luan; bam chip -> dien vao textarea.
+         *
+         * Logic:
+         *   - Tao button cho tung EXAMPLES roi gan listener set value input
+         *
+         * @returns {void}
+         */
         function renderExampleChips() {
             document.getElementById("example-chips").innerHTML = EXAMPLES.map(e =>
                 `<button class="px-2.5 py-1 rounded-full bg-muted border border-border text-[11px] text-slate-400 hover:text-slate-200 hover:border-sky-500 transition-colors duration-200 cursor-pointer">${e}</button>`
@@ -797,6 +909,17 @@ NOI DUNG:
                 }));
         }
 
+        /**
+         * Du doan cam xuc 1 binh luan: POST /api/predict -> hien badge + 3 thanh %.
+         *
+         * Logic:
+         *   - Text rong -> hien loi, khong goi API
+         *   - POST {text}; ket qua {sentiment, sentiment_vi, confidence, probabilities_vi}
+         *   - Badge mau theo nhan (Negative do / Neutral vang / Positive xanh)
+         *   - Render 3 thanh xac suat theo LABELS
+         *
+         * @returns {Promise<void>}
+         */
         async function predict() {
             const text = document.getElementById("input-text").value.trim();
             const errBox = document.getElementById("predict-error");
@@ -837,7 +960,16 @@ NOI DUNG:
             }
         }
 
-        // ---------- Tab: API · Model · Dataset ----------
+        /**
+         * Chuyen tab chinh (Tong quan / API-Model-Dataset / Bots / FB).
+         *
+         * Logic:
+         *   - Toggle hidden 4 tab theo name, cap nhat class nut active
+         *   - Vao tab info -> tai endpoints + model detail + dataset detail
+         *   - Vao tab bots -> bat poll bot log 2s; roi tab khac -> dung poll
+         *
+         * @param {string} name - Ten tab ("overview" | "info" | "bots" | "fb")
+         */
         function switchTab(name) {
             document.getElementById("tab-overview").classList.toggle("hidden", name !== "overview");
             document.getElementById("tab-info").classList.toggle("hidden", name !== "info");
@@ -866,7 +998,16 @@ NOI DUNG:
             }
         }
 
-        // ① API URLs
+        /**
+         * Tai danh sach API tu /api/endpoints (tu sinh tu app.url_map) -> bang.
+         *
+         * Logic:
+         *   - Render table Method (badge GET/POST) + Path + Mo ta + nut Sao chep
+         *   - Nut Sao chep: clipboard.writeText -> doi text 1.2s
+         *   - Hien vi du curl /api/predict ben duoi bang
+         *
+         * @returns {Promise<void>}
+         */
         async function loadEndpoints() {
             const box = document.getElementById("api-table");
             try {
@@ -907,7 +1048,17 @@ NOI DUNG:
             }
         }
 
-        // ② Model train (thông số + bảng metrics từng lớp)
+        /**
+         * Tai chi tiet model (thong so, metrics tung lop, bieu do, bang so sanh).
+         *
+         * Logic:
+         *   - Dong bo 3 API: /api/model-info, /api/train-config, /api/figures, /api/compare
+         *   - Render id2label, bang metrics tung lop (P/R/F1/Support) + Macro
+         *   - Hien 3 bieu do (learning curve, CM, PR curve) tu /figures/<file>
+         *   - Bang so sanh 3 model tu results/compare_table.json
+         *
+         * @returns {Promise<void>}
+         */
         async function loadModelDetail() {
             const box = document.getElementById("model-detail");
             try {
@@ -1022,7 +1173,16 @@ NOI DUNG:
             }
         }
 
-        // ③ Model dataset
+        /**
+         * Tai chi tiet dataset: nguon, thong ke lam sach, label mapping, phan bo.
+         *
+         * Logic:
+         *   - /api/data-info tra stats + mapping + distribution (dung chung loadDataInfo)
+         *   - Render 3 cot: nguon du lieu + bang lam sach, label mapping,
+         *     phan bo nhan tren train (kem ghi chu lop Neutral thieu so)
+         *
+         * @returns {Promise<void>}
+         */
         async function loadDatasetDetail() {
             const box = document.getElementById("dataset-detail");
             try {
@@ -1102,6 +1262,14 @@ NOI DUNG:
         // Colab restart/reload trang; server vẫn nhận config để bot chạy
         const LS_KEY = "sentiment_bot_config_v1";
 
+        /**
+         * Doc config bot luu o localStorage (khong mat khi reload/restart Colab).
+         *
+         * Logic:
+         *   - Parse LS_KEY; loi JSON -> tra {} de khong crash
+         *
+         * @returns {Object} {telegram: {token, chat_id}, zalo: {token, api_base, chat_id}}
+         */
         function botLocalGet() {
             try {
                 return JSON.parse(localStorage.getItem(LS_KEY) || "{}");
@@ -1110,6 +1278,15 @@ NOI DUNG:
             }
         }
 
+        /**
+         * Luu config bot hien tai vao localStorage.
+         *
+         * Logic:
+         *   - Doc gia tri cac input (token/chat_id/base), token trong giu lai gia tri cu
+         *   - Merge vao config da co roi ghi LS_KEY
+         *
+         * @returns {void}
+         */
         function botLocalSave() {
             const local = botLocalGet();
             local.telegram = {
@@ -1124,6 +1301,16 @@ NOI DUNG:
             localStorage.setItem(LS_KEY, JSON.stringify(local));
         }
 
+        /**
+         * Tai config bot (server + localStorage) -> dien vao form va refresh status.
+         *
+         * Logic:
+         *   - /api/bot/config tra token da CHE (khong hien token that ra web)
+         *   - Token: hien placeholder "da luu (nhap moi de doi)" neu co
+         *   - chat_id/api_base: uu tien server, fallback localStorage
+         *
+         * @returns {Promise<void>}
+         */
         async function loadBotConfig() {
             try {
                 const cfg = await api("/api/bot/config");
@@ -1139,6 +1326,15 @@ NOI DUNG:
             }
         }
 
+        /**
+         * Hien thi trang thai 2 bot (Dang chay / Chua co token / Dung) qua badge.
+         *
+         * Logic:
+         *   - /api/bot/status tra {telegram, zalo: {running, has_token, chat_id}}
+         *   - Doi mau badge: xanh = dang chay, do = chua token, vang = dung
+         *
+         * @returns {Promise<void>}
+         */
         async function refreshBotStatus() {
             const st = await api("/api/bot/status");
             ["tg", "zl"].forEach(prefix => {
@@ -1158,6 +1354,16 @@ NOI DUNG:
             });
         }
 
+        /**
+         * Thu thap config bot tu form -> object payload gui len server.
+         *
+         * Logic:
+         *   - Token trong KHONG gui (server giu token cu - khong xoa nham)
+         *   - Zalo them api_base neu co
+         *
+         * @param {string} prefix - "tg" (telegram) hoac "zl" (zalo)
+         * @returns {Object} {telegram|zalo: {token?, chat_id?, api_base?}}
+         */
         function collectBotConfig(prefix) {
             const type = prefix === "tg" ? "telegram" : "zalo";
             const payload = { [type]: {} };
@@ -1172,6 +1378,17 @@ NOI DUNG:
             return payload;
         }
 
+        /**
+         * Luu cau hinh bot (localStorage + server) va hien ket qua.
+         *
+         * Logic:
+         *   - botLocalSave() luu ngay vao trinh duyet (khong mat khi reload)
+         *   - POST /api/bot/config; server tra notes (vd bot da dung de ap dung config)
+         *   - Xoa input token sau khi luu (khong giu token trong DOM)
+         *
+         * @param {string} prefix - "tg" hoac "zl"
+         * @returns {Promise<void>}
+         */
         async function saveBot(prefix) {
             const note = document.getElementById(prefix + "-note");
             try {
@@ -1189,6 +1406,16 @@ NOI DUNG:
             }
         }
 
+        /**
+         * Kiem tra token bot (luu config truoc, goi /api/bot/test).
+         *
+         * Logic:
+         *   - Luu config hien tai truoc de server dung token moi
+         *   - /api/bot/test goi getMe + gui tin test toi chat_id da luu
+         *
+         * @param {string} prefix - "tg" hoac "zl"
+         * @returns {Promise<void>}
+         */
         async function checkBot(prefix) {
             const note = document.getElementById(prefix + "-note");
             try {
@@ -1210,6 +1437,17 @@ NOI DUNG:
             }
         }
 
+        /**
+         * Bat/tat polling bot (goi /api/bot/start hoac /api/bot/stop).
+         *
+         * Logic:
+         *   - POST /api/bot/<action> voi {type}; hien message tu server
+         *   - Refresh trang thai badge sau khi bat/tat
+         *
+         * @param {string} prefix - "tg" hoac "zl"
+         * @param {string} action - "start" hoac "stop"
+         * @returns {Promise<void>}
+         */
         async function toggleBot(prefix, action) {
             const note = document.getElementById(prefix + "-note");
             try {
@@ -1225,6 +1463,16 @@ NOI DUNG:
             }
         }
 
+        /**
+         * Poll log bot tang dan (2s/lan) cho ca telegram + zalo -> append panel.
+         *
+         * Logic:
+         *   - Moi loai bot co since rieng (BOT_LOGS_SINCE) de chi nhan dong moi
+         *   - /api/bot/log?type=<t>&since=<n>; append [ts] [type] msg vao panel
+         *   - Tu dong cuon xuong cuoi
+         *
+         * @returns {Promise<void>}
+         */
         async function pollBotLog() {
             for (const [type, since] of Object.entries(BOT_LOGS_SINCE)) {
                 const data = await api("/api/bot/log?type=" + type + "&since=" + since);
@@ -1257,12 +1505,31 @@ NOI DUNG:
             return v;
         };
 
+        /**
+         * Doc du lieu FB dau vao: uu tien file upload, fallback textarea.
+         *
+         * Logic:
+         *   - Co file -> file.text() (doc async)
+         *   - Khong co file -> value textarea (co the rong)
+         *
+         * @returns {Promise<string>} Noi dung text/file
+         */
         function readFbInput() {
             const file = fbEl("fb-file").files && fbEl("fb-file").files[0];
             if (file) return file.text().then(t => t);
             return Promise.resolve(fbEl("fb-text").value || "");
         }
 
+        /**
+         * Goi API FB (parse/analyze/notify) voi loi HTTP -> throw Error.
+         *
+         * Logic:
+         *   - POST JSON; loi thi doc body.error de hien thi ro rang
+         *
+         * @param {string} url - Duong dan API FB
+         * @param {Object} body - Body JSON gui len
+         * @returns {Promise<Object>} JSON tra ve
+         */
         async function fbFetch(url, body) {
             const resp = await fetch(url, {
                 method: "POST",
@@ -1274,6 +1541,15 @@ NOI DUNG:
             return data;
         }
 
+        /**
+         * Render tom tat ket qua phan tich FB (bai, binh luan, tieu cuc).
+         *
+         * Logic:
+         *   - Lay tu bien fbAnalysis (da load xong); so tieu cuc do neu > 0
+         *   - Hien thong bao kem nguong da dung
+         *
+         * @returns {void}
+         */
         function renderFbSummary() {
             const s = fbEl("fb-summary");
             s.classList.remove("hidden");
@@ -1289,6 +1565,17 @@ NOI DUNG:
             fbEl("fb-status").textContent = `Phân tích xong: ${comments} bình luận, ${negative} tiêu cực (ngưỡng ${t}%).`;
         }
 
+        /**
+         * Render danh sach bai viet + tung binh luan (to mau tieu cuc).
+         *
+         * Logic:
+         *   - Moi bai 1 card: so thu tu, url (mo tab moi), noi dung trich 300 ky tu,
+         *     badge so binh luan tieu cuc
+         *   - Moi binh luan: sentiment_vi + do tin cay + text; binh luan tieu cuc
+         *     co nen do de nhan biet
+         *
+         * @returns {void}
+         */
         function renderFbResults() {
             const list = fbEl("fb-results-list");
             list.innerHTML = "";
@@ -1323,6 +1610,15 @@ NOI DUNG:
             fbEl("fb-results").classList.remove("hidden");
         }
 
+        /**
+         * Parse du lieu FB (text/file) -> gui len /api/fb-posts/parse.
+         *
+         * Logic:
+         *   - Doc input; trong -> bao loi, khong goi API
+         *   - POST /api/fb-posts/parse; hien so bai + so canh bao neu co
+         *
+         * @returns {Promise<void>}
+         */
         async function fbParse() {
             const text = await readFbInput();
             if (!text.trim()) { fbStatus("Chưa có nội dung - dán text hoặc chọn file trước.", "text-amber-400"); return; }
@@ -1337,6 +1633,15 @@ NOI DUNG:
             }
         }
 
+        /**
+         * Bat dau phan tich cam xuc binh luan FB (thread nen, co the 30s-2 phut).
+         *
+         * Logic:
+         *   - Doc input + nguong tieu cuc (luu vao localStorage de nho lan sau)
+         *   - POST /api/fb-posts/analyze (server chay thread nen) -> pollFbAnalysis()
+         *
+         * @returns {Promise<void>}
+         */
         async function fbAnalyze() {
             const text = await readFbInput();
             if (!text.trim()) { fbStatus("Chưa có nội dung - dán text hoặc chọn file trước.", "text-amber-400"); return; }
@@ -1355,6 +1660,16 @@ NOI DUNG:
             }
         }
 
+        /**
+         * Poll ket qua phan tich FB (2s/lan, toi da 4 phut) -> render ket qua.
+         *
+         * Logic:
+         *   - GET /api/fb-posts/analyze (doc results/fb_analysis.json)
+         *   - done=true -> luu fbAnalysis, render summary + results, hien thong bao
+         *   - Het 120 lan poll -> bao het gio, huong dan xem file ket qua
+         *
+         * @returns {Promise<void>}
+         */
         async function pollFbAnalysis() {
             for (let i = 0; i < 120; i++) {
                 await new Promise(r => setTimeout(r, 2000));
@@ -1374,6 +1689,16 @@ NOI DUNG:
             fbStatus("Hết thời gian chờ kết quả - xem file results/fb_analysis.json hoặc thử lại.", "text-amber-400");
         }
 
+        /**
+         * Gui canh bao binh luan tieu cuc qua bot (telegram/zalo).
+         *
+         * Logic:
+         *   - Can fbAnalysis da co (phai Analyze truoc)
+         *   - POST /api/fb-posts/notify voi {type, threshold}; server loc bai
+         *     co binh luan tieu cuc >= nguong va gui tin nhan chunk
+         *
+         * @returns {Promise<void>}
+         */
         async function fbNotify() {
             if (!fbAnalysis) { fbStatus("Chưa có kết quả phân tích - bấm Phân tích trước.", "text-amber-400"); return; }
             const type = fbEl("fb-bot-type").value;

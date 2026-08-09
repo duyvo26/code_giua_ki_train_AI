@@ -56,7 +56,18 @@ NUMBER_OF_POSTS = 5
 
 
 def _load_cookies(context: BrowserContext) -> None:
-    """Nạp cookie đăng nhập (nếu có) từ cookies.txt hoặc cookies.json."""
+    """
+    Nap cookie dang nhap (neu co) tu cookies.txt hoac cookies.json.
+
+    Logic:
+      - Uu tien cookies.txt (dinh dang Netscape: domain, flag, path, secure,
+        expiry, name, value) - parse tung dong, bo dong comment/rng
+      - Neu khong co cookies.txt, dung storage_state tu cookies.json
+        (luu boi --login)
+
+    Args:
+        context (BrowserContext): Browser context cua Playwright de nap cookie vao
+    """
     if COOKIES_TXT.exists():
         cookies = []
         for line in COOKIES_TXT.read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -89,14 +100,36 @@ def _load_cookies(context: BrowserContext) -> None:
 
 
 def _is_login_page(page: Page) -> bool:
-    """Nhận biết trang đăng nhập/login wall của Facebook."""
+    """
+    Nhan biet trang dang nhap/login wall cua Facebook.
+
+    Logic:
+      - URL chua "login" -> chac chan la trang login
+      - Hoac trang co input[name="email"] (form dang nhap hien thi)
+
+    Args:
+        page (Page): Trang hien tai cua Playwright
+
+    Returns:
+        bool: True neu dang o trang dang nhap, nguoc lai False
+    """
     if "login" in page.url:
         return True
     return page.locator('input[name="email"]').count() > 0
 
 
 def _dismiss_consent(page: Page) -> None:
-    """Đóng thông báo đồng ý cookie/banner chặn nếu xuất hiện."""
+    """
+    Dong thong bao dong y cookie/banner chan neu xuat hien.
+
+    Logic:
+      - Duyet danh sach selector ban phim cho moi ngon ngu (EN/VI)
+      - Chi bam khi button/ link visible (timeout ngan de khong treo)
+      - Dung sau lan bam dau tien thanh cong
+
+    Args:
+        page (Page): Trang hien tai cua Playwright
+    """
     for selector in [
         'button:has-text("Cho phép tất cả cookie")',
         'button:has-text("Not Now")',
@@ -114,14 +147,38 @@ def _dismiss_consent(page: Page) -> None:
 
 
 def _scroll_to_load(page: Page, times: int = 4) -> None:
-    """Cuộn feed để các bài viết mới được tải thêm (lazy load)."""
+    """
+    Cuon feed de cac bai viet moi duoc tai them (lazy load).
+
+    Logic:
+      - Cuon chuot xuong 1200px moi lan roi dung SCROLL_PAUSE_MS de
+        Facebook tai them noi dung truoc khi cuon lan tiep
+
+    Args:
+        page (Page): Trang group dang mo
+        times (int): So lan cuon (mac dinh 4)
+    """
     for _ in range(times):
         page.mouse.wheel(0, 1_200)
         page.wait_for_timeout(SCROLL_PAUSE_MS)
 
 
 def _collect_post_urls(page: Page) -> list[str]:
-    """Trích toàn bộ URL bài viết trong DOM, bỏ trùng, giữ thứ tự mới -> cũ."""
+    """
+    Trich toan bo URL bai viet trong DOM, bo trung, giu thu tu moi -> cu.
+
+    Logic:
+      - Quet toan bo the <a> co href chua "story" hoac duong dan group
+      - Dung regex POST_URL_RE de lay post_id tu 2 dang URL:
+        story_fbid=<id> hoac /groups/<id>/(posts|permalink)/<id>
+      - Chuan hoa ve FULL_POST_URL, loai trung qua set
+
+    Args:
+        page (Page): Trang group da cuon xong
+
+    Returns:
+        list[str]: Danh sach URL bai viet (chua deduplicate, moi -> cu)
+    """
     hrefs = page.eval_on_selector_all(
         'a[href*="story"], a[href*="groups/{}"]'.format(GROUP_ID),
         "els => els.map(e => e.href)",
@@ -142,10 +199,16 @@ def _collect_post_urls(page: Page) -> list[str]:
 
 def _login_and_save() -> None:
     """
-    Mở cửa sổ trình duyệt thật để người dùng đăng nhập Facebook bằng tay.
+    Mo cua so trinh duyet that de nguoi dung dang nhap Facebook bang tay.
 
-    Sau khi đăng nhập xong (thoát khỏi trang login), phiên được lưu vào
-    cookies.json và cửa sổ tự đóng - chỉ cần làm một lần.
+    Logic:
+      - Mo Chromium headless=False voi viewport desktop, locale vi_VN
+      - Mo trang facebook.com/login, nguoi dung nhap tay email + mat khau
+      - Poll moi 2s de phat hien dang nhap xong (thoat trang login va
+        khong con input email)
+      - Khi xong: cho 3s cho phien on dinh, luu storage_state vao
+        cookies.json va dong cua so - chi can lam 1 lan
+      - Het LOGIN_TIMEOUT_S (5 phut) ma chua xong thi dong cua so
     """
     print("[login] Mo cua so trinh duyet - vui long dang nhap facebook.com")
     print("[login] bang tai khoan ca nhan (nhap tay email + mat khau).")
@@ -177,7 +240,16 @@ def _login_and_save() -> None:
 
 
 def main() -> None:
-    """Chạy crawl và in 5 URL bài viết mới nhất của group."""
+    """
+    Chay crawl va in 5 URL bai viet moi nhat cua group.
+
+    Logic:
+      - --login: mo trinh duyet de dang nhap, luu phien roi thoat
+      - Khong co flag: mo trang group giau lap iPhone (headless)
+      - Nap cookie da luu, dong consent banner, cuon feed de tai bai
+      - Gap login wall -> in huong dan xu ly (--login hoac cookies.txt)
+      - Luu 5 URL moi nhat vao fb_post_urls.txt va in ra man hinh
+    """
     parser = argparse.ArgumentParser(description="Crawl 5 URL bai viet moi nhat tu group Facebook")
     parser.add_argument(
         "--login",

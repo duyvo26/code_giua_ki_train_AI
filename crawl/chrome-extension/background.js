@@ -21,6 +21,19 @@ const crawlState = {
   error: "",
 };
 
+/**
+ * Cho tab load xong (status=complete) hoac het thoi gian timeout.
+ *
+ * Logic:
+ *   - Lang nghe chrome.tabs.onUpdated de phat hien complete som nhat
+ *   - Dang ky poll 500ms phong truong hop bo loi event (onUpdated miss)
+ *   - Xong: cho them RENDER_PAUSE_MS de Facebook render noi dung
+ *   - Het deadline van load -> tra ve ngay (khong treo crawl)
+ *
+ * @param {number} tabId - ID tab dang cho
+ * @param {number} timeoutMs - Thoi gian toi da cho (ms)
+ * @returns {Promise<void>}
+ */
 function waitForTabComplete(tabId, timeoutMs) {
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
@@ -64,6 +77,17 @@ function waitForTabComplete(tabId, timeoutMs) {
   });
 }
 
+/**
+ * Bao dam content script da duoc inject vao tab.
+ *
+ * Logic:
+ *   - Ping content script truoc; OK thi thoi
+ *   - Loi (chua inject / tab vua load) -> inject lai content.js qua scripting
+ *
+ * @param {number} tabId - ID tab can kiem tra
+ * @returns {Promise<void>}
+ * @throws {Error} Neu inject that bai
+ */
 async function ensureContentScript(tabId) {
   try {
     const resp = await chrome.tabs.sendMessage(tabId, { type: "PING" });
@@ -77,6 +101,17 @@ async function ensureContentScript(tabId) {
   }
 }
 
+/**
+ * Luu bai viet + trang thai crawl hien tai vao storage.
+ *
+ * Logic:
+ *   - Luu STORAGE_KEY (bai viet) va CRAWL_STATE_KEY (trang thai) cung luc
+ *   - Popup lang nghe storage.onChanged de cap nhat UI realtime
+ *
+ * @param {Array} posts - Danh sach bai viet (cap nhat mo lan crawl)
+ * @param {string} [error] - Loi crawl (neu co), mac dinh giu nguyen
+ * @returns {Promise<void>}
+ */
 async function persist(posts, error) {
   crawlState.error = error || "";
   await chrome.storage.local.set({
@@ -85,10 +120,27 @@ async function persist(posts, error) {
   });
 }
 
+/**
+ * Luu rieng trang thai crawl (khong cham toi bai viet).
+ *
+ * Logic:
+ *   - Dung khi chi doi trang thai (pause/unpause, progress)
+ *
+ * @returns {Promise<void>}
+ */
 async function persistState() {
   await chrome.storage.local.set({ [CRAWL_STATE_KEY]: { ...crawlState } });
 }
 
+/**
+ * Dung (block) luong crawl khi trang thai paused = true.
+ *
+ * Logic:
+ *   - Poll storage moi 1s, thoat ngay khi paused = false
+ *   - Dung truoc khi chuyen tab (o startCrawl) de khong mo bai khi paused
+ *
+ * @returns {Promise<void>}
+ */
 async function waitIfPaused() {
   while (true) {
     const { [CRAWL_STATE_KEY]: state } = await chrome.storage.local.get(CRAWL_STATE_KEY);
@@ -97,11 +149,37 @@ async function waitIfPaused() {
   }
 }
 
+/**
+ * Bat/tat trang thai paused cua crawl.
+ *
+ * Logic:
+ *   - Cap nhat bien crawlState.paused roi luu qua persistState
+ *   - Popup nut Tam dung/Tiep tuc goi SET_PAUSE -> ham nay
+ *
+ * @param {boolean} paused - True de tam dung, false de tiep tuc
+ * @returns {Promise<void>}
+ */
 async function setPaused(paused) {
   crawlState.paused = paused;
   await persistState();
 }
 
+/**
+ * Chay crawl: dieu huong tab qua tung bai, trich noi dung, luu lai.
+ *
+ * Logic:
+ *   - Khoi tao trang thai (running, total, done=0) va luu ngay
+ *   - Voi moi bai: cho neu paused -> chuyen tab toi bai -> cho load xong
+ *     -> inject content script -> EXTRACT_CONTENT -> luu content/error
+ *   - Sau moi bai persist de popup hien tien trinh thuc te
+ *   - Loi 1 bai khong dung crawl (bat loi quanh tung bai)
+ *   - Ket thuc: quay ve URL group ban dau, running = false
+ *
+ * @param {Array} posts - Danh sach bai viet (sua truc tiep: content, error)
+ * @param {number} tabId - ID tab dung de crawl
+ * @param {string|null} originalUrl - URL group de quay ve sau khi xong
+ * @returns {Promise<void>}
+ */
 async function startCrawl(posts, tabId, originalUrl) {
   crawlState.running = true;
   crawlState.paused = false;

@@ -51,7 +51,21 @@ DIR_AUTO_RE = re.compile(r'<div dir="auto"[^>]*>(.*?)</div>', re.DOTALL)
 
 
 def clean_text(raw: str) -> str:
-    """Bỏ thẻ HTML, giải mã entity, dồn khoảng trắng."""
+    """
+    Bo the HTML, giai ma entity, don khoang trang.
+
+    Logic:
+      - <br> chuyen thanh xuong dong (giu cau truc doan van)
+      - Bo toan bo the <tag> con lai thay bang khoang trang
+      - html.unescape giai ma entity (vd &amp; -> &)
+      - Don nhieu khoang trang lien tiep thanh 1, bo dong trong thua
+
+    Args:
+        raw (str): Chuoi HTML/plain text tho
+
+    Returns:
+        str: Text da lam sach
+    """
     text = re.sub(r"<br\s*/?>", "\n", raw)
     text = re.sub(r"<[^>]+>", " ", text)
     text = html_mod.unescape(text)
@@ -61,7 +75,22 @@ def clean_text(raw: str) -> str:
 
 
 def build_session(cookies_path: Path | None) -> requests.Session:
-    """Tạo session; nạp cookies.txt (Netscape) nếu có."""
+    """
+    Tao session; nap cookies.txt (Netscape) neu co.
+
+    Logic:
+      - Tao Session voi User-Agent iPhone + Accept-Language vi_VN,
+        dung certifi de xac thuc SSL (tranh loi chung chi tren Colab)
+      - Nap cookies.txt: moi dong tab-separated 7+ truong Netscape,
+        bo dong comment/rng, expiry la so thi truyen int
+      - Khong co file -> tra session rong (chi lay duoc noi dung bai)
+
+    Args:
+        cookies_path (Path | None): Duong dan cookies.txt, None neu khong dung
+
+    Returns:
+        requests.Session: Session da cau hinh headers (va cookies neu co)
+    """
     session = requests.Session()
     session.headers.update(HEADERS)
     session.verify = certifi.where()
@@ -94,7 +123,25 @@ def build_session(cookies_path: Path | None) -> requests.Session:
 
 
 def fetch_page(session: requests.Session, url: str) -> tuple[str, str]:
-    """GET trang, retry 3 lan; tra ve (noi dung HTML, url cuoi cung)."""
+    """
+    GET trang, retry 3 lan; tra ve (noi dung HTML, url cuoi cung).
+
+    Logic:
+      - Cho phep redirect de theo den URL cuoi cung (FB hay redirect
+        story.php sang link norm)
+      - HTTP != 200 hoac loi mang -> retry toi 3 lan, nghi 2-4-6s
+      - Het retry van loi -> raise loi cuoi cung (khong nuot loi)
+
+    Args:
+        session (requests.Session): Session da co cookies
+        url (str): URL trang can lay
+
+    Returns:
+        tuple[str, str]: (HTML text, url cuoi sau redirect)
+
+    Raises:
+        RuntimeError: Loi HTTP sau 3 lan thu hoac loi mang tiep dien
+    """
     last_exc = None
     for attempt in range(3):
         try:
@@ -109,7 +156,20 @@ def fetch_page(session: requests.Session, url: str) -> tuple[str, str]:
 
 
 def parse_post_text(raw_html: str) -> str:
-    """Trich noi dung bai viet tu meta og:description/og:title."""
+    """
+    Trich noi dung bai viet tu meta og:description/og:title.
+
+    Logic:
+      - Uu tien og:description (chua toan bo noi dung bai)
+      - Fallback og:title, loai bo hau to " | Facebook"
+      - Khong co ca hai -> tra chuoi rong
+
+    Args:
+        raw_html (str): HTML trang bai viet
+
+    Returns:
+        str: Noi dung bai viet da giai ma entity
+    """
     desc = re.search(r'og:description" content="([^"]*)"', raw_html)
     if desc and desc.group(1).strip():
         return html_mod.unescape(desc.group(1)).strip()
@@ -120,7 +180,23 @@ def parse_post_text(raw_html: str) -> str:
 
 
 def parse_comments(raw_html: str) -> list[str]:
-    """Tach tung block binh luan va lay text (kem ten nguoi dung)."""
+    """
+    Tach tung block binh luan va lay text (kem ten nguoi dung).
+
+    Logic:
+      - Bieu thuc data-testid="post-comment" danh dau block moi binh luan
+        (cung la block dau tien cua moi phan tu con) -> split de tach block
+      - Mo block lay text gan nhat (author + noi dung) qua clean_text
+      - Neu khong tim thay marker: cat tu dau "Xem thêm comment" roi
+        lay toan bo div[dir="auto"] lam binh luan (fallback cu)
+      - Gioi han moi binh luan 2000 ky tu
+
+    Args:
+        raw_html (str): HTML trang bai viet
+
+    Returns:
+        list[str]: Danh sach binh luan dang text
+    """
     comments: list[str] = []
     parts = COMMENT_BLOCK_RE.split(raw_html)
     if len(parts) > 1:
@@ -140,7 +216,22 @@ def parse_comments(raw_html: str) -> list[str]:
 
 
 def find_expand_link(raw_html: str, page_url: str) -> str | None:
-    """Tim link 'Xem thêm bình luận' / 'View more comments'."""
+    """
+    Tim link 'Xem them binh luan' / 'View more comments'.
+
+    Logic:
+      - Regex khop the <a> co text chua "Xem th" hoac "View more/all"
+        (ignorecase de ho tro EN/VI)
+      - Giai ma entity href roi noi voi page_url (urljoin) vi FB
+        tra duong dan tuong doi hoac tuyet doi
+
+    Args:
+        raw_html (str): HTML trang hien tai
+        page_url (str): URL trang dang xem (de noi duong dan tuong doi)
+
+    Returns:
+        str | None: URL link "Xem them" hoac None neu khong co
+    """
     match = EXPAND_LINK_RE.search(raw_html)
     if not match:
         return None
@@ -149,7 +240,24 @@ def find_expand_link(raw_html: str, page_url: str) -> str | None:
 
 
 def fetch_comments(session: requests.Session, story_url: str, raw_html: str) -> list[str]:
-    """Lay binh luan + theo link 'Xem thêm bình luận' toi khi het."""
+    """
+    Lay binh luan + theo link 'Xem them binh luan' toi khi het.
+
+    Logic:
+      - Vong lap toi MAX_EXPAND (8) lan: parse binh luan trang hien tai,
+        loai trung qua set, roi tim link "Xem them" de mo trang ke tiep
+      - Du MAX_COMMENTS (200) thi dung som
+      - Gap link dan ve trang login (FB chan) thi dung
+      - Nghi 1s giua cac request de tranh bi Facebook chan
+
+    Args:
+        session (requests.Session): Session da co cookies
+        story_url (str): URL bai viet goc
+        raw_html (str): HTML trang dau tien (da fetch)
+
+    Returns:
+        list[str]: Danh sach binh luan (toi da MAX_COMMENTS)
+    """
     comments: list[str] = []
     seen: set[str] = set()
     current_url = story_url
@@ -175,7 +283,23 @@ def fetch_comments(session: requests.Session, story_url: str, raw_html: str) -> 
 
 
 def process_one(session: requests.Session, url: str, has_cookies: bool) -> dict:
-    """Xu ly 1 bai viet: noi dung + binh luan."""
+    """
+    Xu ly 1 bai viet: noi dung + binh luan.
+
+    Logic:
+      - Fetch trang bai viet, kiem tra redirect ve login (bi chan)
+      - Khong bi chan: trich noi dung bai tu meta og
+      - Chi lay binh luan khi co cookies (has_cookies) - khong co thi
+        bo qua binh luan (FB chan khi chua dang nhap)
+
+    Args:
+        session (requests.Session): Session da co cookies
+        url (str): URL bai viet can lay
+        has_cookies (bool): Co nap duoc cookies.txt khong
+
+    Returns:
+        dict: {url, text, comments} hoac {url, error} khi bi chan
+    """
     raw_html, final_url = fetch_page(session, url)
     if "login" in final_url and "login" not in url:
         return {"url": url, "error": "bi Facebook chan - can cookies dang nhap", "text": "", "comments": []}
@@ -190,7 +314,18 @@ def process_one(session: requests.Session, url: str, has_cookies: bool) -> dict:
 
 
 def write_output(posts: list[dict], out_path: Path) -> None:
-    """Ghi file txt: URL + noi dung + binh luan."""
+    """
+    Ghi file txt: URL + noi dung + binh luan.
+
+    Logic:
+      - Format: "=== BAI N ===", URL, "NOI DUNG BAI:", text,
+        "BINH LUAN (n):" danh so thu tu tung binh luan
+      - Bai co loi -> in dong "KET QUA: LOI - <error>"
+
+    Args:
+        posts (list[dict]): Danh sach bai da xu ly (tu process_one)
+        out_path (Path): Duong dan file xuat ra
+    """
     lines: list[str] = []
     for index, post in enumerate(posts, start=1):
         lines.append("==============================")
@@ -212,6 +347,18 @@ def write_output(posts: list[dict], out_path: Path) -> None:
 
 
 def main() -> None:
+    """
+    CLI: lay noi dung + binh luan tu 1 URL hoac file danh sach URL.
+
+    Logic:
+      - --url: xu ly 1 bai; --input: doc file (1 URL/dong)
+      - Tu dong dung cookies.txt trong thu muc crawl/ neu co,
+        hoac --cookies de chi dinh file khac
+      - Moi bai xu ly doc lap: loi 1 bai khong chan cac bai con lai
+      - --dump-html: luu HTML trang dau tien vao debug_page.html
+      - --json: xuat them file .json cung ten voi --out
+      - Ket qua ghi vao --out (mac dinh crawl/posts_content.txt)
+    """
     parser = argparse.ArgumentParser(description="Lay noi dung + binh luan tu link story.php")
     parser.add_argument("--url", help="Mot URL bai viet")
     parser.add_argument("--input", help="File chua danh sach URL (1 URL/dong)")
