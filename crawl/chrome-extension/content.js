@@ -497,6 +497,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local") {
     if (changes[POST_COUNT_KEY]) applyPostCount();
     if (changes[LOAD_WAIT_KEY]) applyLoadWait();
+    if (changes[STORAGE_KEY]) {
+      // Popup xoa bai cu -> reset signature de quet lai tu dau duoc
+      const newValue = changes[STORAGE_KEY].newValue;
+      if (!newValue || newValue.length === 0) lastSavedSignature = "";
+    }
   }
 });
 

@@ -19,6 +19,7 @@ const AUTO_CLOSE_TAB_KEY = "fb_auto_close_tab";
 const EXPECTED_EXT_VERSION = 7;
 
 const buttonDownload = document.getElementById("download");
+const buttonClear = document.getElementById("clearPosts");
 const buttonScan = document.getElementById("scan");
 const buttonSaveConfig = document.getElementById("saveConfig");
 const buttonRunAuto = document.getElementById("runAuto");
@@ -180,6 +181,23 @@ buttonDownload.addEventListener("click", async () => {
   }
   downloadFile("fb_posts_content.txt", buildOutputText(posts));
   setStatus("Da tai fb_posts_content.txt (Downloads).", "ok");
+});
+
+/**
+ * Xoa toan bo bai viet cu da luu trong storage (reset cong don).
+ *
+ * Logic:
+ *   - Hoi xac nhan truoc khi xoa (khong the khoi phuc)
+ *   - chrome.storage.local.remove(STORAGE_KEY) -> content script lang nghe
+ *     onChanged se reset lastSavedSignature de quet lai tu dau duoc
+ *   - Render lai popup ve trang thai "chua co du lieu"
+ */
+buttonClear.addEventListener("click", () => {
+  if (!confirm("Xoa toan bo bai viet cu da luu trong extension?")) return;
+  chrome.storage.local.remove(STORAGE_KEY).then(() => {
+    setStatus("Da xoa toan bo bai cu.", "ok");
+    refreshFromStorage();
+  });
 });
 
 /**
