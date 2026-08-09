@@ -324,7 +324,7 @@ let lastSavedSignature = "";
 
 // Version content script - popup kiem tra de tu inject lai khi script cu
 // con song trong tab da mo (sau khi reload extension ma chua F5 trang)
-const EXT_VERSION = 15;
+const EXT_VERSION = 16;
 
 /**
  * Doc so bai toi da tu chrome.storage.local va cap nhat bien postLimit.
@@ -676,13 +676,19 @@ async function sendPostsToWeb(posts) {
  *        storage (postLimit mac dinh) -> autoScrollScan (tu cuon lay du bai)
  *   - B3: co bai moi -> sendPostsToWeb() (web tu phan tich + tu gui bot)
  *   - B4: bao background AUTO_TAB_DONE de DONG TAB (fallback window.close)
- *   - Co loi gi cung phai bao tat tab (auto tab khong can giu lai)
+ *   - CHONG GUI 2 LAN: co autoTabStarted - trigger nao toi sau (timeout
+ *     self-detect hoac message AUTO_TAB tu alarm) deu bi bo qua, chi 1
+ *     scan duy nhat cho moi tab
  *
  * @param {number|null} postGetLimit - So bai can lay tu URL (#postget#N),
  *     null -> dung so bai mac dinh trong storage
  * @returns {Promise<{posts: number, sent: Object|null, stopped: string}>} Tom tat
  */
 async function runAutoTab(postGetLimit) {
+  if (autoTabStarted) {
+    return { posts: 0, sent: null, stopped: "dup_skipped" };
+  }
+  autoTabStarted = true;
   try {
     await chrome.runtime.sendMessage({ type: "AUTO_TAB_START" });
   } catch (_err) {
@@ -769,9 +775,13 @@ function parsePostGetLimit() {
  *   - Marker dung dang FRAGMENT #closetab (ben vung - khong bi FB/redirect
  *     strip) HOAC query ?closetab=true (tuong thich URL cu)
  *   - So bai lay co the chi dinh qua #postget#N (vd #closetab#postget#10)
- *   - Phat hien duoc -> cho 4s cho FB render feed roi chay runAutoTab()
+ *   - Phat hien duoc -> gui AUTO_TAB_START NGAY (background dang ky handledAutoTabs
+ *     tu giay dau -> alarm sweep bo qua, het cua so dua 0-4s gay GUI 2 LAN)
+ *     roi cho 4s cho FB render feed truoc khi quet
  *   - Day la nguon phat hien CHINH; background chi dang tab + lưới alarm
  */
+let autoTabStarted = false;
+
 function maybeRunAutoTab() {
   try {
     // Bang trang thai LUON HIEN o dau trang (idle khi chua quet)
@@ -781,6 +791,12 @@ function maybeRunAutoTab() {
     const hasQuery = new URLSearchParams(location.search).get("closetab") === "true";
     if (hasHash || hasQuery) {
       const limit = parsePostGetLimit();
+      // Bao background NGAY de dang ky tab -> alarm sweep khong xu ly trung
+      try {
+        chrome.runtime.sendMessage({ type: "AUTO_TAB_START" }).catch(() => {});
+      } catch (_err) {
+        // bo qua - runAutoTab van gui lai neu can
+      }
       setTimeout(() => {
         runAutoTab(limit).catch(() => {});
       }, 4000);
@@ -796,6 +812,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // Kem version de popup phat hien content script cu con song trong tab
     sendResponse({ ok: true, version: EXT_VERSION });
   } else if (message && message.type === "AUTO_SCAN") {
+    // Popup bam "Quet 1 trang" - CHONG QUET CHONG: neu auto tab dang/da chay
+    // tren tab nay thi bo qua de khong gui web 2 lan
+    if (autoTabStarted) {
+      sendResponse({ count: 0, totalComments: 0, skipped: "auto_running" });
+      return;
+    }
     // Popup bam "Quet 1 trang": bang trang thai + broadcast progress
     updateAutoBar({ state: "running", message: "Đang chạy - đang lấy dữ liệu bài viết..." });
     autoScrollScan(message.limit || postLimit, (prog) => {
@@ -830,7 +852,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     });
     return true;
   } else if (message && message.type === "AUTO_TAB") {
-    // Background phat hien tab auto (fallback alarm) -> chay auto
+    // Background phat hien tab auto (fallback alarm) - runAutoTab tu chan
+    // trung qua autoTabStarted (timeout self-detect co the da chay truoc)
     runAutoTab(message.limit || null)
       .then((summary) => sendResponse(summary || {}))
       .catch((err) => sendResponse({ error: String((err && err.message) || err) }));

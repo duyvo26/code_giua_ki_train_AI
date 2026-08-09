@@ -11,7 +11,7 @@ const CRAWL_STATE_KEY = "fb_crawl_state";
 const LOAD_TIMEOUT_MS = 30000;
 const RENDER_PAUSE_MS = 2500;
 // Phai khop EXT_VERSION trong content.js - cu hon thi re-inject lai
-const EXPECTED_EXT_VERSION = 15;
+const EXPECTED_EXT_VERSION = 16;
 
 const crawlState = {
   running: false,
@@ -395,10 +395,11 @@ async function startCrawl(posts, tabId, originalUrl) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === "AUTO_TAB_START") {
-    // Content tu phat hien tab auto -> hien thong bao + badge + danh dau
-    // de alarm sweep khong xu ly trung
+    // Content phat hien tab auto -> hien thong bao + badge + danh dau
+    // de alarm sweep khong xu ly trung. Idempotent: tab da dang ky (content
+    // gui lai khi runAutoTab chay) thi chi cap nhat notification.
     const tabId = sender && sender.tab ? sender.tab.id : null;
-    if (tabId !== null) {
+    if (tabId !== null && !handledAutoTabs.has(tabId)) {
       handledAutoTabs.add(tabId);
       chrome.action.setBadgeText({ tabId, text: "FB" });
       chrome.action.setBadgeBackgroundColor({ tabId, color: "#1877F2" });
