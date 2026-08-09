@@ -2060,6 +2060,8 @@ NOI DUNG:
                                     <td class="py-2 pr-3 text-slate-400 whitespace-nowrap">${s.last_run || "-"}</td>
                                     <td class="py-2 pr-3 text-slate-300 whitespace-nowrap">${s.next_run || "-"}</td>
                                     <td class="py-2 text-right whitespace-nowrap">
+                                        <button data-url="${encodeURIComponent(s.url)}" data-postget="${s.post_limit || ""}"
+                                            class="btn-sch-run px-2 py-1 rounded bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-300 text-[10px] font-medium transition-colors duration-200 cursor-pointer">Chạy ngay</button>
                                         <button data-toggle="${s.id}"
                                             class="btn-sch-toggle px-2 py-1 rounded ${s.enabled ? "bg-amber-950/60 text-amber-300 hover:bg-amber-900/70" : "bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/70"} text-[10px] font-medium transition-colors duration-200 cursor-pointer">${s.enabled ? "Tắt" : "Bật"}</button>
                                         <button data-del="${s.id}"
@@ -2073,6 +2075,8 @@ NOI DUNG:
                     btn.addEventListener("click", () => toggleSchedule(btn.dataset.toggle)));
                 box.querySelectorAll(".btn-sch-del").forEach(btn =>
                     btn.addEventListener("click", () => deleteSchedule(btn.dataset.del)));
+                box.querySelectorAll(".btn-sch-run").forEach(btn =>
+                    btn.addEventListener("click", () => runScheduleNow(btn.dataset.url, btn.dataset.postget)));
             } catch (err) {
                 box.innerHTML = `<p class="text-red-400 text-xs">${err.message}</p>`;
             }
@@ -2166,6 +2170,31 @@ NOI DUNG:
             } catch (err) {
                 document.getElementById("schedule-list").innerHTML =
                     `<p class="text-red-400 text-xs">${err.message}</p>`;
+            }
+        }
+
+        /**
+         * Chay NGAY LAP TUC 1 lich hen: mo tab FB kem #closetab (va #postget#N
+         * neu co so bai lay) - khong can cho den gio hen.
+         *
+         * Logic:
+         *   - Khong doi trang thai lich hen (next_run_at giu nguyen - lich
+         *     van chay theo chu ky cu cua no)
+         *   - window.open tu click (user gesture) nen khong bi popup blocker
+         *   - Extension thay #closetab -> tu quet + gui web + tu dong tat tab
+         *
+         * @param {string} encodedUrl - URL group (encodeURIComponent de an toan trong attribute)
+         * @param {string} postget - So bai lay (rong = mac dinh extension)
+         * @returns {void}
+         */
+        function runScheduleNow(encodedUrl, postget) {
+            const url = decodeURIComponent(encodedUrl || "");
+            if (!url) return;
+            let openUrl = url + "#closetab";
+            if (postget) openUrl += "#postget#" + postget;
+            const opened = window.open(openUrl, "_blank");
+            if (!opened) {
+                alert("Khong mo duoc tab - hay cho phep popup cho trang web nay roi thu lai.");
             }
         }
 
