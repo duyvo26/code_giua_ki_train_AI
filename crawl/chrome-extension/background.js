@@ -11,7 +11,7 @@ const CRAWL_STATE_KEY = "fb_crawl_state";
 const LOAD_TIMEOUT_MS = 30000;
 const RENDER_PAUSE_MS = 2500;
 // Phai khop EXT_VERSION trong content.js - cu hon thi re-inject lai
-const EXPECTED_EXT_VERSION = 14;
+const EXPECTED_EXT_VERSION = 15;
 
 const crawlState = {
   running: false,

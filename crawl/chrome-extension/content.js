@@ -324,7 +324,7 @@ let lastSavedSignature = "";
 
 // Version content script - popup kiem tra de tu inject lai khi script cu
 // con song trong tab da mo (sau khi reload extension ma chua F5 trang)
-const EXT_VERSION = 14;
+const EXT_VERSION = 15;
 
 /**
  * Doc so bai toi da tu chrome.storage.local va cap nhat bien postLimit.
@@ -506,69 +506,128 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-/* --- THANH TRẠNG THÁI TRÊN TRANG (FB Grabber) ------------------------------ */
+/* --- BẢNG TRẠNG THÁI LUÔN HIỆN (FB Grabber) - Shadow DOM ------------------- */
 
-const AUTO_BAR_ID = "fb-grabber-bar";
-const BAR_BLUE = "#1877F2";   // dang chay
-const BAR_GREEN = "#188038";  // xong / thanh cong
-const BAR_RED = "#D93025";    // loi
+const AUTO_BAR_ROOT_ID = "fb-grabber-root";
+const BAR_STATES = {
+  idle: { bg: "#1A1E2F", border: "#334155", fg: "#94A3B8" },
+  running: { bg: "#1877F2", border: "#4C9AFF", fg: "#FFFFFF" },
+  done: { bg: "#188038", border: "#3BA55D", fg: "#FFFFFF" },
+  error: { bg: "#D93025", border: "#F04A3A", fg: "#FFFFFF" },
+};
+
+let autoBarShadow = null;
 
 /**
- * Hien thanh trang thai nho o dau trang web (fixed, giua man hinh).
+ * Tao bang trang thai LUON HIEN o dau trang (Shadow DOM, goi 1 lan).
  *
  * Logic:
- *   - Tao 1 div duy nhat (id co dinh, chong duplicate) noi vao documentElement
- *   - pointer-events: none de khong chan thao tac cua nguoi dung tren FB
- *   - Doi mau theo trang thai: xanh FB (chay) / xanh la (xong) / do (loi)
- *
- * @param {string} text - Noi dung hien thi
- * @param {string} color - Mau nen (BAR_BLUE / BAR_GREEN / BAR_RED)
+ *   - Host div id co dinh (chong duplicate), position fixed dinh dau trang
+ *   - attachShadow closed -> inject HTML + <style> rieng, CO LAP 100% voi
+ *     CSS cua Facebook (khong bi FB de, khong lam hong layout trang)
+ *   - Bang hien thi ngay trang thai idle "san sang" - luon o dau trang
+ *     ke ca khi cuon, khong tu an
  */
-function showAutoBar(text, color) {
+function ensureAutoBar() {
   try {
-    let bar = document.getElementById(AUTO_BAR_ID);
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = AUTO_BAR_ID;
-      Object.assign(bar.style, {
-        position: "fixed",
-        top: "8px",
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: "999999",
-        background: color || BAR_BLUE,
-        color: "#fff",
-        padding: "8px 16px",
-        borderRadius: "8px",
-        fontSize: "13px",
-        fontWeight: "600",
-        fontFamily: "-apple-system, 'Segoe UI', sans-serif",
-        boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
-        maxWidth: "90%",
-        textAlign: "center",
-        pointerEvents: "none",
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-      });
-      document.documentElement.appendChild(bar);
+    if (autoBarShadow) return;
+    let root = document.getElementById(AUTO_BAR_ROOT_ID);
+    if (!root) {
+      root = document.createElement("div");
+      root.id = AUTO_BAR_ROOT_ID;
+      root.style.cssText =
+        "position:fixed;top:0;left:0;right:0;z-index:999999;" +
+        "pointer-events:none;font-family:-apple-system,'Segoe UI',sans-serif;";
+      document.documentElement.appendChild(root);
     }
-    bar.style.background = color || BAR_BLUE;
-    bar.textContent = text;
+    autoBarShadow = root.attachShadow({ mode: "closed" });
+    autoBarShadow.innerHTML = `
+      <style>
+        .bar {
+          display: flex; align-items: center; gap: 10px;
+          padding: 6px 14px; font-size: 12px; font-weight: 600;
+          color: var(--fg); background: var(--bg);
+          border-bottom: 1px solid var(--border);
+          box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+          transition: background 0.3s ease;
+        }
+        .spinner {
+          width: 12px; height: 12px; border-radius: 50%;
+          border: 2px solid rgba(255,255,255,0.35);
+          border-top-color: #fff;
+          animation: fbspin 0.8s linear infinite;
+          flex-shrink: 0;
+        }
+        .spinner.hidden { display: none; }
+        @keyframes fbspin { to { transform: rotate(360deg); } }
+        .title { font-weight: 700; white-space: nowrap; flex-shrink: 0; }
+        .msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .count {
+          flex-shrink: 0; padding: 1px 8px; border-radius: 10px;
+          background: rgba(255,255,255,0.2); font-size: 11px;
+          font-variant-numeric: tabular-nums;
+        }
+        .count.hidden { display: none; }
+      </style>
+      <div class="bar" id="bar">
+        <span class="spinner hidden" id="spinner"></span>
+        <span class="title">FB Grabber</span>
+        <span class="msg" id="msg">sẵn sàng</span>
+        <span class="count hidden" id="count"></span>
+      </div>`;
   } catch (_err) {
     // DOM loi nho - bo qua
   }
 }
 
 /**
- * Xoa thanh trang thai tren trang.
+ * JS DIEU KHIEN hien thi bang trang thai.
+ *
+ * Logic:
+ *   - state: idle (xam) / running (xanh FB + spinner xoay) / done (xanh la) / error (do)
+ *   - count: "X bài · Y bình luận" - hien khi co (running/done/error)
+ *   - message: text trang thai
+ *   - KHONG tu an - bang luon o dau trang (giu trang thai cuoi)
+ *
+ * @param {Object} data - {state, count, totalComments, message}
  */
-function hideAutoBar() {
+function updateAutoBar(data) {
+  ensureAutoBar();
+  if (!autoBarShadow) return;
   try {
-    const bar = document.getElementById(AUTO_BAR_ID);
-    if (bar) bar.remove();
+    const state = BAR_STATES[data.state] ? data.state : "idle";
+    const colors = BAR_STATES[state];
+    const bar = autoBarShadow.getElementById("bar");
+    const spinner = autoBarShadow.getElementById("spinner");
+    const msg = autoBarShadow.getElementById("msg");
+    const count = autoBarShadow.getElementById("count");
+
+    bar.style.setProperty("--bg", colors.bg);
+    bar.style.setProperty("--border", colors.border);
+    bar.style.setProperty("--fg", colors.fg);
+
+    spinner.classList.toggle("hidden", state !== "running");
+
+    let text = data.message || "";
+    if (state === "running") {
+      text = text || "Đang chạy - đang lấy dữ liệu bài viết...";
+    } else if (state === "done") {
+      text = text || "Xong!";
+    } else if (state === "error") {
+      text = text || "Có lỗi xảy ra";
+    } else {
+      text = text || "sẵn sàng";
+    }
+    msg.textContent = text;
+
+    const hasCount = data.count != null;
+    count.classList.toggle("hidden", !hasCount);
+    if (hasCount) {
+      count.textContent =
+        data.count + " bài" + (data.totalComments != null ? " · " + data.totalComments + " bình luận" : "");
+    }
   } catch (_err) {
-    // bo qua
+    // loi nho - bo qua
   }
 }
 
@@ -629,39 +688,44 @@ async function runAutoTab(postGetLimit) {
   } catch (_err) {
     // background khong nhan - van tiep tuc quet
   }
-  showAutoBar("FB Grabber: đang chạy - đang lấy dữ liệu bài viết...", BAR_BLUE);
+  updateAutoBar({ state: "running", message: "Đang chạy - đang lấy dữ liệu bài viết..." });
   let limit = postGetLimit;
   if (!limit) {
     const { [POST_COUNT_KEY]: count } = await chrome.storage.local.get(POST_COUNT_KEY);
     limit = parseInt(count, 10) || 5;
   }
   const result = await autoScrollScan(limit, (prog) => {
-    showAutoBar(
-      "FB Grabber: đang lấy... " + prog.count + " bài viết, " + prog.totalComments + " bình luận",
-      BAR_BLUE
-    );
+    updateAutoBar({
+      state: "running",
+      count: prog.count,
+      totalComments: prog.totalComments,
+      message: "Đang lấy dữ liệu bài viết...",
+    });
   });
   let sent = null;
   if (result.posts.length > 0) {
     sent = await sendPostsToWeb(result.posts);
   }
   const summary = { posts: result.posts.length, sent, stopped: result.stopped };
-  // Hien ket qua tren thanh trang thai ~5s (tab sap dong)
+  const totalComments = result.posts.reduce((sum, p) => sum + p.comments.length, 0);
+  // Bang luon hien: cap nhat trang thai cuoi (khong tu an)
   if (sent && sent.ok) {
-    showAutoBar(
-      "Xong! Lấy được " + result.posts.length + " bài viết - đã gửi web phân tích + gửi bot",
-      BAR_GREEN
-    );
+    updateAutoBar({
+      state: "done",
+      count: result.posts.length,
+      totalComments,
+      message: "Xong! Đã gửi web phân tích + gửi bot",
+    });
   } else if (result.posts.length === 0) {
-    showAutoBar("Xong - không có bài viết mới (0 bài)", BAR_GREEN);
+    updateAutoBar({ state: "done", count: 0, message: "Xong - không có bài viết mới (0 bài)" });
   } else {
-    showAutoBar(
-      "Lấy được " + result.posts.length + " bài NHƯNG gửi web lỗi: " +
-      ((sent && sent.message) || "không xác định"),
-      BAR_RED
-    );
+    updateAutoBar({
+      state: "error",
+      count: result.posts.length,
+      totalComments,
+      message: "Lỗi gửi web: " + ((sent && sent.message) || "không xác định"),
+    });
   }
-  setTimeout(hideAutoBar, 5000);
   try {
     await chrome.runtime.sendMessage({ type: "AUTO_TAB_DONE", ...summary });
   } catch (_err) {
@@ -710,6 +774,9 @@ function parsePostGetLimit() {
  */
 function maybeRunAutoTab() {
   try {
+    // Bang trang thai LUON HIEN o dau trang (idle khi chua quet)
+    ensureAutoBar();
+    updateAutoBar({ state: "idle", message: "sẵn sàng" });
     const hasHash = location.hash.toLowerCase().includes("closetab");
     const hasQuery = new URLSearchParams(location.search).get("closetab") === "true";
     if (hasHash || hasQuery) {
@@ -729,22 +796,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // Kem version de popup phat hien content script cu con song trong tab
     sendResponse({ ok: true, version: EXT_VERSION });
   } else if (message && message.type === "AUTO_SCAN") {
-    // Popup bam "Quet 1 trang": hien thanh trang thai tren trang + broadcast
-    showAutoBar("FB Grabber: đang chạy - đang lấy dữ liệu bài viết...", BAR_BLUE);
+    // Popup bam "Quet 1 trang": bang trang thai + broadcast progress
+    updateAutoBar({ state: "running", message: "Đang chạy - đang lấy dữ liệu bài viết..." });
     autoScrollScan(message.limit || postLimit, (prog) => {
-      showAutoBar(
-        "FB Grabber: đang lấy... " + prog.count + " bài viết, " + prog.totalComments + " bình luận",
-        BAR_BLUE
-      );
+      updateAutoBar({
+        state: "running",
+        count: prog.count,
+        totalComments: prog.totalComments,
+        message: "Đang lấy dữ liệu bài viết...",
+      });
       // Popup co the dong giua chung - ket qua van duoc luu vao storage
       chrome.runtime.sendMessage({ type: "FB_SCAN_PROGRESS", ...prog }).catch(() => {});
     }).then((result) => {
       const totalComments = result.posts.reduce((sum, p) => sum + p.comments.length, 0);
-      showAutoBar(
-        "Xong! Lấy được " + result.posts.length + " bài viết (" + totalComments + " bình luận)",
-        BAR_GREEN
-      );
-      setTimeout(hideAutoBar, 5000);
+      updateAutoBar({
+        state: "done",
+        count: result.posts.length,
+        totalComments,
+        message: "Xong! Lấy được " + result.posts.length + " bài viết",
+      });
       sendResponse({ ...result, count: result.posts.length, totalComments });
     });
     return true;
