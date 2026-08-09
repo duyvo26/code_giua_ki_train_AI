@@ -1386,6 +1386,8 @@ def schedules_add():
 
     Logic:
       - Nhận {url, interval_seconds} (hoặc interval_minutes/interval_hours)
+      - post_limit (tuỳ chọn): số bài cần lấy mỗi lần (1-100), web mở tab
+        kem #postget#N de extension lay dung so bai
       - Validate URL chứa facebook.com/groups/ + khoảng cách trong 10s..7 ngày
       - Lần chạy đầu tiên sau interval_seconds
     """
@@ -1408,7 +1410,16 @@ def schedules_add():
     if not 10 <= seconds <= 7 * 24 * 3600:
         return jsonify({"error": "Khoang cach phai trong 10 giay..7 ngay"}), 400
 
-    schedule = add_schedule(url, seconds)
+    post_limit = data.get("post_limit")
+    if post_limit is not None:
+        try:
+            post_limit = int(post_limit)
+        except (TypeError, ValueError):
+            return jsonify({"error": "So bai lay (post_limit) khong hop le"}), 400
+        if not 1 <= post_limit <= 100:
+            return jsonify({"error": "So bai lay phai trong 1..100"}), 400
+
+    schedule = add_schedule(url, seconds, post_limit)
     return jsonify({"ok": True, "schedule": schedule}), 201
 
 

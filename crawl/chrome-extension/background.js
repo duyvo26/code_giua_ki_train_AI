@@ -11,7 +11,7 @@ const CRAWL_STATE_KEY = "fb_crawl_state";
 const LOAD_TIMEOUT_MS = 30000;
 const RENDER_PAUSE_MS = 2500;
 // Phai khop EXT_VERSION trong content.js - cu hon thi re-inject lai
-const EXPECTED_EXT_VERSION = 11;
+const EXPECTED_EXT_VERSION = 12;
 
 const crawlState = {
   running: false,
@@ -65,9 +65,10 @@ function notify(id, title, message) {
  *     handledAutoTabs -> sweep bo qua, khong chay trung
  *
  * @param {number} tabId - ID tab auto can xu ly
+ * @param {number|null} limit - So bai can lay (tu #postget#N), null = mac dinh
  * @returns {Promise<void>}
  */
-async function handleAutoTab(tabId) {
+async function handleAutoTab(tabId, limit) {
   notify(AUTO_TAB_NOTIF_ID, "FB Grabber", "Đã phát hiện tab tự động (closetab) - đang lấy dữ liệu bài viết...");
   try {
     chrome.action.setBadgeText({ tabId, text: "FB" });
@@ -78,7 +79,7 @@ async function handleAutoTab(tabId) {
     for (let attempt = 0; attempt < AUTO_TAB_RETRY; attempt++) {
       try {
         await ensureContentScript(tabId);
-        resp = await chrome.tabs.sendMessage(tabId, { type: "AUTO_TAB" });
+        resp = await chrome.tabs.sendMessage(tabId, { type: "AUTO_TAB", limit: limit || null });
         break;
       } catch (_err) {
         // Tab con loading / content script chua san - thu lai sau 2s
@@ -123,6 +124,30 @@ async function handleAutoTab(tabId) {
 const AUTO_TAB_NOTIF_ID = "auto-tab";
 
 /**
+ * Parse so bai can lay tu URL tab auto: #postget#10 hoac ?postget=10.
+ *
+ * Logic:
+ *   - Format hash: URL#closetab#postget#10 -> 10
+ *   - Format query: URL?closetab=true&postget=10 -> 10
+ *   - Kep trong 1..100; khong co -> null (dung mac dinh trong storage)
+ *
+ * @param {string} url - URL tab dang kiem tra
+ * @returns {number|null} So bai can lay hoac null
+ */
+function parsePostGetFromUrl(url) {
+  try {
+    const hashMatch = String(url).toLowerCase().match(/#postget#(\d+)/);
+    if (hashMatch) return Math.min(100, Math.max(1, parseInt(hashMatch[1], 10)));
+    const u = new URL(url);
+    const query = u.searchParams.get("postget");
+    if (query) return Math.min(100, Math.max(1, parseInt(query, 10)));
+  } catch (_err) {
+    // bo qua
+  }
+  return null;
+}
+
+/**
  * Quet dinh ky (30s): tab nao URL con marker closetab ma chua xu ly
  * (khong nam trong handledAutoTabs) -> xu ly fallback qua handleAutoTab().
  *
@@ -142,7 +167,7 @@ async function sweepAutoTabs() {
         tab.url.includes("closetab=true") || tab.url.toLowerCase().includes("#closetab");
       if (hasMarker && !handledAutoTabs.has(tab.id)) {
         handledAutoTabs.add(tab.id);
-        handleAutoTab(tab.id);
+        handleAutoTab(tab.id, parsePostGetFromUrl(tab.url));
       }
     }
   } catch (_err) {

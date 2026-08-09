@@ -492,6 +492,11 @@ NOI DUNG:
                         <option value="hours">Giờ</option>
                     </select>
                 </div>
+                <div>
+                    <label for="sch-postget" class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Số bài lấy (bỏ trống = mặc định)</label>
+                    <input id="sch-postget" type="number" min="1" max="100" placeholder="10"
+                           class="w-20 bg-slate-900 border border-border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                </div>
                 <button id="btn-add-schedule"
                         class="px-4 py-2 rounded-md bg-cyan-600 hover:bg-cyan-500 text-xs font-semibold transition-colors duration-200 cursor-pointer">
                     Thêm lịch
@@ -2013,12 +2018,13 @@ NOI DUNG:
 
         // ---------- Hẹn giờ quét tự động ----------
         /**
-         * Tai danh sach lich hen -> render bang (URL, khoang cach, lan chay,
-         * lan ke tiep, bat/tat, xoa).
+         * Tai danh sach lich hen -> render bang (URL, khoang cach, so bai lay,
+         * lan chay, lan ke tiep, bat/tat, xoa).
          *
          * Logic:
          *   - GET /api/schedules -> {schedules: [...]}
          *   - Khoang cach hien thi dang doc ("5 phut" / "2 gio" / "30 giay")
+         *   - So bai lay: con so hoac "mac dinh" (extension tu chon)
          *   - Nut Bat/Tat: toggle -> tai lai; Nut Xoa: delete -> tai lai
          *
          * @returns {Promise<void>}
@@ -2042,6 +2048,7 @@ NOI DUNG:
                     <table class="w-full text-xs">
                         <thead><tr class="text-left text-slate-500 border-b border-border">
                             <th class="py-2 pr-3">URL</th><th class="pr-3">Khoảng cách</th>
+                            <th class="pr-3">Số bài lấy</th>
                             <th class="pr-3">Chạy gần nhất</th><th class="pr-3">Kế tiếp</th><th></th>
                         </tr></thead>
                         <tbody>
@@ -2049,6 +2056,7 @@ NOI DUNG:
                                 <tr class="border-b border-border/50 ${s.enabled ? "" : "opacity-50"}">
                                     <td class="py-2 pr-3 font-mono text-cyan-300 break-all max-w-[340px]">${s.url}</td>
                                     <td class="py-2 pr-3 text-slate-300 whitespace-nowrap">${fmtInterval(s)}</td>
+                                    <td class="py-2 pr-3 text-slate-300 whitespace-nowrap">${s.post_limit ? s.post_limit + " bài" : '<span class="text-slate-500">mặc định</span>'}</td>
                                     <td class="py-2 pr-3 text-slate-400 whitespace-nowrap">${s.last_run || "-"}</td>
                                     <td class="py-2 pr-3 text-slate-300 whitespace-nowrap">${s.next_run || "-"}</td>
                                     <td class="py-2 text-right whitespace-nowrap">
@@ -2076,6 +2084,8 @@ NOI DUNG:
          * Logic:
          *   - Validate URL chua facebook.com/groups/ + khoang cach >= 1
          *   - Doi don vi giay/phut/gio -> interval_seconds
+         *   - Số bài lấy (post_limit) tuychon: de trong -> extension dung
+         *     so bai mac dinh cua no
          *
          * @returns {Promise<void>}
          */
@@ -2083,6 +2093,7 @@ NOI DUNG:
             const url = document.getElementById("sch-url").value.trim();
             const interval = parseInt(document.getElementById("sch-interval").value, 10);
             const unit = document.getElementById("sch-unit").value;
+            const postgetRaw = document.getElementById("sch-postget").value.trim();
             const note = document.getElementById("schedule-list");
             if (!url.includes("facebook.com/groups/")) {
                 note.innerHTML = '<p class="text-red-400 text-xs">URL phai la trang group Facebook.</p>';
@@ -2097,12 +2108,21 @@ NOI DUNG:
                 if (unit === "seconds") body.interval_seconds = interval;
                 else if (unit === "hours") body.interval_hours = interval;
                 else body.interval_minutes = interval;
+                if (postgetRaw) {
+                    const postLimit = parseInt(postgetRaw, 10);
+                    if (!postLimit || postLimit < 1 || postLimit > 100) {
+                        note.innerHTML = '<p class="text-red-400 text-xs">So bai lay phai trong 1..100 (hoac de trong).</p>';
+                        return;
+                    }
+                    body.post_limit = postLimit;
+                }
                 await api("/api/schedules", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(body),
                 });
                 document.getElementById("sch-url").value = "";
+                document.getElementById("sch-postget").value = "";
                 await loadSchedules();
             } catch (err) {
                 note.innerHTML = `<p class="text-red-400 text-xs">${err.message}</p>`;
@@ -2168,8 +2188,11 @@ NOI DUNG:
                 const acked = [];
                 for (const item of due) {
                     // Marker dung dang FRAGMENT #closetab - ben vung nhat (khong
-                    // bi FB/redirect strip, khong gui len server)
-                    const opened = window.open(item.url + "#closetab", "_blank");
+                    // bi FB/redirect strip, khong gui len server). Co so bai lay
+                    // (post_limit) thi them #postget#N de extension lay dung so.
+                    let openUrl = item.url + "#closetab";
+                    if (item.post_limit) openUrl += "#postget#" + item.post_limit;
+                    const opened = window.open(openUrl, "_blank");
                     if (opened) acked.push(item.id);
                 }
                 if (acked.length) {

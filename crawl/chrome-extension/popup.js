@@ -14,7 +14,7 @@ const LOAD_WAIT_KEY = "fb_load_wait";
 const WEB_URL_KEY = "fb_web_url";
 const API_KEY_KEY = "fb_api_key";
 // Phai khop EXT_VERSION trong content.js - neu cu hon thi re-inject lai
-const EXPECTED_EXT_VERSION = 11;
+const EXPECTED_EXT_VERSION = 12;
 
 const buttonDownload = document.getElementById("download");
 const buttonClear = document.getElementById("clearPosts");

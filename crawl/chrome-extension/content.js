@@ -323,7 +323,7 @@ let lastSavedSignature = "";
 
 // Version content script - popup kiem tra de tu inject lai khi script cu
 // con song trong tab da mo (sau khi reload extension ma chua F5 trang)
-const EXT_VERSION = 11;
+const EXT_VERSION = 12;
 
 /**
  * Doc so bai toi da tu chrome.storage.local va cap nhat bien postLimit.
@@ -610,22 +610,28 @@ async function sendPostsToWeb(posts) {
  *
  * Logic:
  *   - B1: bao background AUTO_TAB_START de hien notification + badge
- *   - B2: doc postLimit tu storage, chay autoScrollScan (tu cuon lay du bai)
+ *   - B2: lay so bai can quet: postGetLimit (tu #postget#N) hoac doc tu
+ *        storage (postLimit mac dinh) -> autoScrollScan (tu cuon lay du bai)
  *   - B3: co bai moi -> sendPostsToWeb() (web tu phan tich + tu gui bot)
  *   - B4: bao background AUTO_TAB_DONE de DONG TAB (fallback window.close)
  *   - Co loi gi cung phai bao tat tab (auto tab khong can giu lai)
  *
+ * @param {number|null} postGetLimit - So bai can lay tu URL (#postget#N),
+ *     null -> dung so bai mac dinh trong storage
  * @returns {Promise<{posts: number, sent: Object|null, stopped: string}>} Tom tat
  */
-async function runAutoTab() {
+async function runAutoTab(postGetLimit) {
   try {
     await chrome.runtime.sendMessage({ type: "AUTO_TAB_START" });
   } catch (_err) {
     // background khong nhan - van tiep tuc quet
   }
   showAutoBar("FB Grabber: đang chạy - đang lấy dữ liệu bài viết...", BAR_BLUE);
-  const { [POST_COUNT_KEY]: count } = await chrome.storage.local.get(POST_COUNT_KEY);
-  const limit = parseInt(count, 10) || 5;
+  let limit = postGetLimit;
+  if (!limit) {
+    const { [POST_COUNT_KEY]: count } = await chrome.storage.local.get(POST_COUNT_KEY);
+    limit = parseInt(count, 10) || 5;
+  }
   const result = await autoScrollScan(limit, (prog) => {
     showAutoBar(
       "FB Grabber: đang lấy... " + prog.count + " bài viết, " + prog.totalComments + " bình luận",
@@ -667,11 +673,35 @@ async function runAutoTab() {
 }
 
 /**
+ * Parse so bai can lay tu URL: #postget#10 (hash) hoac ?postget=10 (query).
+ *
+ * Logic:
+ *   - Format hash: URL#closetab#postget#10 -> 10
+ *   - Format query: URL?closetab=true&postget=10 -> 10
+ *   - Kep trong 1..100 de tranh gia tri vo ly
+ *   - Khong co -> null (dung so bai mac dinh trong storage)
+ *
+ * @returns {number|null} So bai can lay hoac null
+ */
+function parsePostGetLimit() {
+  try {
+    const hashMatch = location.hash.toLowerCase().match(/#postget#(\d+)/);
+    if (hashMatch) return Math.min(100, Math.max(1, parseInt(hashMatch[1], 10)));
+    const query = new URLSearchParams(location.search).get("postget");
+    if (query) return Math.min(100, Math.max(1, parseInt(query, 10)));
+  } catch (_err) {
+    // bo qua
+  }
+  return null;
+}
+
+/**
  * Phat hien tab auto khi content script chay (document_idle).
  *
  * Logic:
  *   - Marker dung dang FRAGMENT #closetab (ben vung - khong bi FB/redirect
  *     strip) HOAC query ?closetab=true (tuong thich URL cu)
+ *   - So bai lay co the chi dinh qua #postget#N (vd #closetab#postget#10)
  *   - Phat hien duoc -> cho 4s cho FB render feed roi chay runAutoTab()
  *   - Day la nguon phat hien CHINH; background chi dang tab + lưới alarm
  */
@@ -680,8 +710,9 @@ function maybeRunAutoTab() {
     const hasHash = location.hash.toLowerCase().includes("closetab");
     const hasQuery = new URLSearchParams(location.search).get("closetab") === "true";
     if (hasHash || hasQuery) {
+      const limit = parsePostGetLimit();
       setTimeout(() => {
-        runAutoTab().catch(() => {});
+        runAutoTab(limit).catch(() => {});
       }, 4000);
     }
   } catch (_err) {
@@ -726,8 +757,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     });
     return true;
   } else if (message && message.type === "AUTO_TAB") {
-    // Background phat hien tab ?closetab=true -> chay auto: quet + gui web
-    runAutoTab()
+    // Background phat hien tab auto (fallback alarm) -> chay auto
+    runAutoTab(message.limit || null)
       .then((summary) => sendResponse(summary || {}))
       .catch((err) => sendResponse({ error: String((err && err.message) || err) }));
     return true;

@@ -78,13 +78,15 @@ def list_schedules() -> list[dict]:
     return schedules
 
 
-def add_schedule(url: str, interval_seconds: int) -> dict:
+def add_schedule(url: str, interval_seconds: int, post_limit: int | None = None) -> dict:
     """
     Them 1 lich hen moi (lan chay dau tien sau interval_seconds).
 
     Args:
         url (str): URL group Facebook
         interval_seconds (int): Khoang cach giua cac lan quet (giay)
+        post_limit (int | None): So bai can lay moi lan (1-100), None = mac
+            dinh theo cau hinh trong extension
 
     Returns:
         dict: Lich hen vua them
@@ -94,6 +96,7 @@ def add_schedule(url: str, interval_seconds: int) -> dict:
         "id": secrets.token_hex(6),
         "url": url,
         "interval_seconds": int(interval_seconds),
+        "post_limit": post_limit,
         "last_run_at": None,
         "next_run_at": now + int(interval_seconds),
         "enabled": True,
@@ -147,11 +150,17 @@ def due_schedules(now: float | None = None) -> list[dict]:
         now (float | None): Thoi diem so sanh (mac dinh time.time())
 
     Returns:
-        list[dict]: Danh sach lich den gio ({id, url, interval_seconds})
+        list[dict]: Danh sach lich den gio
+            ({id, url, interval_seconds, post_limit})
     """
     now = now if now is not None else time.time()
     return [
-        {"id": s["id"], "url": s["url"], "interval_seconds": s["interval_seconds"]}
+        {
+            "id": s["id"],
+            "url": s["url"],
+            "interval_seconds": s["interval_seconds"],
+            "post_limit": s.get("post_limit"),
+        }
         for s in _load()
         if s.get("enabled", True) and (s.get("next_run_at") or 0) <= now
     ]
