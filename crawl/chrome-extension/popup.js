@@ -1,10 +1,11 @@
 /*
  * Popup: hien thi ket qua + dieu khien quet.
- *   - Nut "Quet ngay" -> gui AUTO_SCAN toi content script: tu cuon trang
- *     thu thap CONG DON (loc trung), nhan tien trinh qua FB_SCAN_PROGRESS.
- *   - Sau khi quet xong: gui danh sach bai ve web (/api/extension/analyze)
+ *   - Nut "Quet 1 trang + gui web" -> gui AUTO_SCAN toi content script: tu
+ *     cuon trang thu thap CONG DON (loc trung), gui ve web /api/extension/analyze
  *     kem API key - web tu phan tich cam xuc + tu gui canh bao bot.
- *   - Cau hinh web (URL + API key) bat buoc truoc khi quet.
+ *   - He gio tu web: web tu mo tab ?closetab=true -> content tu quet + gui
+ *     web + bao background dong tab (khong can lam gi trong popup).
+ *   - Cau hinh web (1 o JSON: webUrl + apiKey) bat buoc truoc khi quet.
  */
 
 const STORAGE_KEY = "fb_posts";
@@ -12,24 +13,16 @@ const POST_COUNT_KEY = "fb_post_count";
 const LOAD_WAIT_KEY = "fb_load_wait";
 const WEB_URL_KEY = "fb_web_url";
 const API_KEY_KEY = "fb_api_key";
-const AUTO_URLS_KEY = "fb_auto_urls";
-const AUTO_DELAY_KEY = "fb_auto_delay";
-const AUTO_CLOSE_TAB_KEY = "fb_auto_close_tab";
 // Phai khop EXT_VERSION trong content.js - neu cu hon thi re-inject lai
-const EXPECTED_EXT_VERSION = 7;
+const EXPECTED_EXT_VERSION = 8;
 
 const buttonDownload = document.getElementById("download");
 const buttonClear = document.getElementById("clearPosts");
 const buttonScan = document.getElementById("scan");
 const buttonSaveConfig = document.getElementById("saveConfig");
-const buttonRunAuto = document.getElementById("runAuto");
-const buttonStopAuto = document.getElementById("stopAuto");
 const countInput = document.getElementById("postCount");
 const loadWaitInput = document.getElementById("loadWait");
 const webConfigInput = document.getElementById("webConfigJson");
-const autoUrlsInput = document.getElementById("autoUrls");
-const autoDelayInput = document.getElementById("autoDelay");
-const autoCloseTabInput = document.getElementById("autoCloseTab");
 const statusEl = document.getElementById("status");
 const resultEl = document.getElementById("result");
 
@@ -353,120 +346,6 @@ buttonScan.addEventListener("click", async () => {
   }
 });
 
-/**
- * Luu cau hinh trang auto (danh sach URL + delay + dong tab) vao storage.
- *
- * Logic:
- *   - Luu khi user doi gia tri (change) de khong mat khi dong popup
- */
-function saveAutoConfig() {
-  chrome.storage.local.set({
-    [AUTO_URLS_KEY]: autoUrlsInput.value.trim(),
-    [AUTO_DELAY_KEY]: autoDelayInput.value.trim(),
-    [AUTO_CLOSE_TAB_KEY]: autoCloseTabInput.checked,
-  }).catch(() => {});
-}
-
-/**
- * Chay auto-crawl: gui START_AUTO_CRAWL toi background - background mo
- * tab moi nen, mo tung trang, quet va gui web NGAY sau moi trang.
- *
- * Logic:
- *   - Validate: can URL web + api key (de background gui web), can danh sach
- *     URL hop le (chua facebook.com/groups/), delay 1-60s
- *   - Khoa nut Chay, hien nut Dung, luu config, gui message toi background
- *   - Ket qua tung trang qua AUTO_CRAWL_PROGRESS, tong ket qua AUTO_CRAWL_DONE
- *
- * @returns {Promise<void>}
- */
-async function runAutoCrawl() {
-  if (!webUrlState || !apiKeyState) {
-    setStatus("Can cau hinh web o phia tren (dan JSON tu web roi Luu).", "error");
-    return;
-  }
-  const urls = autoUrlsInput.value.split("\n").map((u) => u.trim()).filter(Boolean);
-  const valid = urls.filter((u) => u.includes("facebook.com/groups/"));
-  if (valid.length === 0) {
-    setStatus("Nhap it nhat 1 URL group hop le (chua facebook.com/groups/).", "error");
-    return;
-  }
-  const delay = parseInt(autoDelayInput.value, 10);
-  if (!delay || delay < 1 || delay > 60) {
-    autoDelayInput.value = 5;
-    setStatus("Delay phai trong 1-60 giay - dat lai 5.", "error");
-    return;
-  }
-  saveAutoConfig();
-  buttonRunAuto.disabled = true;
-  buttonStopAuto.style.display = "block";
-  setStatus("Dang mo tung trang auto (" + valid.length + " trang, delay " + delay + "s)...", "ok");
-  try {
-    const resp = await chrome.runtime.sendMessage({
-      type: "START_AUTO_CRAWL",
-      urls: valid,
-      delayMs: delay * 1000,
-      limit: parseInt(countInput.value, 10) || 5,
-      closeTab: autoCloseTabInput.checked,
-    });
-    if (resp && resp.ok === false) {
-      setStatus("Loi: " + (resp.error || "khong xac dinh"), "error");
-    }
-  } catch (err) {
-    setStatus("Loi khoi dong auto: " + err.message, "error");
-  }
-}
-
-/**
- * Nut Dung: gui STOP_AUTO_CRAWL toi background - dung sau trang hien tai.
- *
- * Logic:
- *   - Khoa nut Dung ngay, cho AUTO_CRAWL_DONE de mo khoa lai
- */
-async function stopAutoCrawl() {
-  buttonStopAuto.disabled = true;
-  setStatus("Dang dung sau trang hien tai...", "ok");
-  try {
-    const resp = await chrome.runtime.sendMessage({ type: "STOP_AUTO_CRAWL" });
-    if (resp && resp.ok === false) {
-      setStatus("Loi: " + (resp.error || "khong xac dinh"), "error");
-      buttonStopAuto.disabled = false;
-    }
-  } catch (err) {
-    setStatus("Loi dung: " + err.message, "error");
-    buttonStopAuto.disabled = false;
-  }
-}
-
-/**
- * Nhan tien trinh auto-crawl tu background (AUTO_CRAWL_PROGRESS/DONE).
- *
- * Logic:
- *   - PROGRESS: hien trang x/y + so bai + ket qua gui web (hoac ly do skip)
- *   - DONE: mo khoa nut Chay, an nut Dung, hien tong ket (dung/het)
- */
-chrome.runtime.onMessage.addListener((message) => {
-  if (message && message.type === "AUTO_CRAWL_PROGRESS") {
-    let detail = "0 bai";
-    if (message.pageCount > 0) {
-      detail = message.pageCount + " bai (" + (message.totalComments || 0) + " binh luan), gui web: " +
-        (message.sent && message.sent.ok ? "OK" : "LOI - " + ((message.sent && message.sent.message) || "?"));
-    } else if (message.skipReason) {
-      detail = "bo qua (" + message.skipReason + ")";
-    }
-    setStatus("Trang " + message.done + "/" + message.total + ": " + detail, "ok");
-  } else if (message && message.type === "AUTO_CRAWL_DONE") {
-    buttonRunAuto.disabled = false;
-    buttonStopAuto.style.display = "none";
-    buttonStopAuto.disabled = false;
-    const closeInfo = message.tabClosed ? " - tab da tu dong dong" : "";
-    setStatus(
-      "Auto xong: " + message.done + "/" + message.total + " trang" +
-      (message.stopped ? " (da DUNG)" : "") + closeInfo + ". Xem lich su tren web.",
-      "ok"
-    );
-  }
-});
-
 countInput.addEventListener("change", () => {
   const value = parseInt(countInput.value, 10);
   if (!value || value < 1) {
@@ -491,21 +370,12 @@ loadWaitInput.addEventListener("change", () => {
   });
 });
 
-buttonRunAuto.addEventListener("click", runAutoCrawl);
-buttonStopAuto.addEventListener("click", stopAutoCrawl);
-[autoUrlsInput, autoDelayInput, autoCloseTabInput].forEach((el) =>
-  el.addEventListener("change", saveAutoConfig));
-
 chrome.storage.local.get([
-  STORAGE_KEY, POST_COUNT_KEY, LOAD_WAIT_KEY,
-  WEB_URL_KEY, API_KEY_KEY, AUTO_URLS_KEY, AUTO_DELAY_KEY, AUTO_CLOSE_TAB_KEY,
+  STORAGE_KEY, POST_COUNT_KEY, LOAD_WAIT_KEY, WEB_URL_KEY, API_KEY_KEY,
 ]).then((data) => {
   if (data[POST_COUNT_KEY]) countInput.value = data[POST_COUNT_KEY];
   if (data[LOAD_WAIT_KEY]) loadWaitInput.value = data[LOAD_WAIT_KEY];
   if (data[WEB_URL_KEY]) webUrlState = data[WEB_URL_KEY];
   if (data[API_KEY_KEY]) apiKeyState = data[API_KEY_KEY];
-  if (data[AUTO_URLS_KEY]) autoUrlsInput.value = data[AUTO_URLS_KEY];
-  if (data[AUTO_DELAY_KEY]) autoDelayInput.value = data[AUTO_DELAY_KEY];
-  if (data[AUTO_CLOSE_TAB_KEY] === false) autoCloseTabInput.checked = false;
   refreshFromStorage();
 });

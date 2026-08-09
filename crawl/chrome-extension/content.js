@@ -323,7 +323,7 @@ let lastSavedSignature = "";
 
 // Version content script - popup kiem tra de tu inject lai khi script cu
 // con song trong tab da mo (sau khi reload extension ma chua F5 trang)
-const EXT_VERSION = 7;
+const EXT_VERSION = 8;
 
 /**
  * Doc so bai toi da tu chrome.storage.local va cap nhat bien postLimit.
@@ -601,19 +601,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // Kem version de popup phat hien content script cu con song trong tab
     sendResponse({ ok: true, version: EXT_VERSION });
   } else if (message && message.type === "AUTO_SCAN") {
-    // Auto-crawl: kiem tra dung URL truoc khi quet (expectedUrl = URL dang xu ly)
-    if (message.expectedUrl) {
-      const normalize = (u) => String(u || "").split("?")[0].replace(/\/+$/, "");
-      if (normalize(location.href) !== normalize(message.expectedUrl)) {
-        sendResponse({
-          skipped: true,
-          reason: "url_mismatch",
-          expectedUrl: message.expectedUrl,
-          currentUrl: location.href,
-        });
-        return;
-      }
-    }
     // Auto-scroll async: tra loi sau khi xong, bao tien trinh moi buoc
     autoScrollScan(message.limit || postLimit, (prog) => {
       // Popup co the dong giua chung - ket qua van duoc luu vao storage

@@ -50,7 +50,7 @@
 </head>
 <body>
   <h1>FB Group URL Grabber</h1>
-  <div id="hint">Bam "Quet 1 trang" -> tu cuon trang hien tai, thu thap cong don (loc trung) roi gui web tu phan tich + gui bot. "Quet auto nhieu trang" -> mo tung trang da cau hinh.</div>
+  <div id="hint">"Quet 1 trang + gui web" -> tu cuon trang hien tai, thu thap cong don (loc trung) roi gui web tu phan tich + gui bot. He gio tu web: web tu mo tab ?closetab=true -> extension tu quet + gui web + tu tat tab.</div>
   <label for="postCount">So bai co binh luan cong khai can tim:</label>
   <input type="number" id="postCount" min="1" max="50" value="5">
   <label for="loadWait">Thoi gian cho load moi lan cuon (ms):</label>
@@ -60,14 +60,6 @@
   <input type="text" id="webConfigJson" placeholder='{"webUrl":"https://xxx.trycloudflare.com","apiKey":"32-ky-tu"}'>
   <button id="saveConfig" class="secondary">Luu cau hinh web</button>
   <button id="scan">Quet 1 trang + gui web</button>
-  <div class="section-title">Auto quet nhieu trang</div>
-  <label for="autoUrls">Trang auto (1 URL/dong - tu dong mo de quet):</label>
-  <textarea id="autoUrls" rows="3" placeholder="https://www.facebook.com/groups/762609615053439"></textarea>
-  <label for="autoDelay">Delay moi trang truoc khi quet (giay):</label>
-  <input type="number" id="autoDelay" min="1" max="60" value="5">
-  <label class="checkbox"><input type="checkbox" id="autoCloseTab" checked> Tu dong dong tab sau khi xong</label>
-  <button id="runAuto">Quet auto nhieu trang</button>
-  <button id="stopAuto" class="secondary" style="display:none">Dung quet</button>
   <div id="status">Chua co du lieu. Mo trang group bat ky.</div>
   <div id="result"></div>
   <button id="download" class="secondary" disabled>Tai file fb_posts_content.txt</button>
