@@ -29,23 +29,52 @@ const AUTO_TAB_SETTLE_MS = 4000; // cho Facebook render feed truoc khi quet
 const AUTO_TAB_RETRY = 3;        // so lan thu lai khi trang chua san sang
 
 /**
+ * Hien thong bao he thong cua extension.
+ *
+ * Logic:
+ *   - Dung cho luong auto tab (?closetab=true): nguoi dung can biet
+ *     extension da phat hien va dang lay du lieu
+ *   - id rieng theo tab de cap nhat/clear dung notification cu
+ *
+ * @param {string} id - ID notification (vd "auto-<tabId>")
+ * @param {string} title - Tieu de thong bao
+ * @param {string} message - Noi dung thong bao
+ */
+function notify(id, title, message) {
+  try {
+    chrome.notifications.create(id, {
+      type: "basic",
+      iconUrl: "icon.png",
+      title,
+      message,
+      priority: 1,
+    });
+  } catch (_err) {
+    // notification loi nho - bo qua
+  }
+}
+
+/**
  * Xu ly 1 tab auto (?closetab=true): cho load -> dam bao content script moi
- * -> bao content chay AUTO_TAB (tu quet + gui web) -> hien badge trang thai.
+ * -> bao content chay AUTO_TAB (tu quet + gui web) -> hien badge + thong bao.
  *
  * Logic:
  *   - Background bat URL qua chrome.tabs.onUpdated NGAY khi tab duoc mo
  *     (truoc khi Facebook co the viet lai URL lam mat param ?closetab=true)
+ *   - Hien notification "Da phat hien - dang lay du lieu" ngay lap tuc
  *   - Cho AUTO_TAB_SETTLE_MS de FB render feed
  *   - ensureContentScript() tu ping + re-inject neu content script cu/chua co
  *   - Retry toi AUTO_TAB_RETRY lan neu trang chua san sang (loi loading)
- *   - Content tra {posts, sent} -> badge OK/ERR; tab tu dong dong qua
- *     AUTO_TAB_DONE (handler rieng)
+ *   - Content tra {posts, sent} -> badge + notification OK/ERR/0 bai
+ *   - Tab tu dong dong qua AUTO_TAB_DONE (handler rieng)
  *   - Xoa badge sau 5s
  *
  * @param {number} tabId - ID tab auto can xu ly
  * @returns {Promise<void>}
  */
 async function handleAutoTab(tabId) {
+  const notifId = "auto-" + tabId;
+  notify(notifId, "FB Grabber", "Đã phát hiện tab tự động (?closetab=true) - đang lấy dữ liệu bài viết...");
   try {
     chrome.action.setBadgeText({ tabId, text: "FB" });
     chrome.action.setBadgeBackgroundColor({ tabId, color: "#1877F2" });
@@ -65,9 +94,24 @@ async function handleAutoTab(tabId) {
       }
     }
     if (resp) {
-      const ok = resp.posts > 0 && resp.sent && resp.sent.ok;
+      const posts = resp.posts || 0;
+      const ok = posts > 0 && resp.sent && resp.sent.ok;
       chrome.action.setBadgeText({ tabId, text: ok ? "OK" : "ERR" });
       chrome.action.setBadgeBackgroundColor({ tabId, color: ok ? "#188038" : "#D93025" });
+      if (ok) {
+        notify(notifId, "FB Grabber - XONG",
+          "Lấy được " + posts + " bài viết - đã gửi về web để phân tích + gửi bot.");
+      } else if (posts === 0) {
+        notify(notifId, "FB Grabber - XONG",
+          "Không có bài viết mới nào (0 bài). Tab sẽ tự đóng.");
+      } else {
+        notify(notifId, "FB Grabber - LOI GUI WEB",
+          "Lấy được " + posts + " bài NHƯNG gửi web lỗi: " +
+          ((resp.sent && resp.sent.message) || "không xác định"));
+      }
+    } else {
+      notify(notifId, "FB Grabber - KHONG PHAN HOI",
+        "Không nhận được phản hồi từ trang - kiểm tra lại extension (Reload) và thử lại.");
     }
   } catch (_err) {
     // Loi ngoai le - tab co the da bi dong, bo qua

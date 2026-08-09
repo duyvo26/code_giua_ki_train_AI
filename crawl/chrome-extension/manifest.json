@@ -1,15 +1,19 @@
 {
   "manifest_version": 3,
   "name": "FB Group URL Grabber",
-  "version": "3.9",
+  "version": "3.10",
   "author": "duyvo26",
   "description": "Lay URL bai viet moi nhat cua bat ky group Facebook, mo tung bai va trich noi dung",
   "permissions": [
     "downloads",
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "notifications"
   ],
+  "icons": {
+    "128": "icon.png"
+  },
   "host_permissions": [
     "*://www.facebook.com/groups/*",
     "*://m.facebook.com/groups/*",
