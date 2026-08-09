@@ -16,7 +16,7 @@ const AUTO_URLS_KEY = "fb_auto_urls";
 const AUTO_DELAY_KEY = "fb_auto_delay";
 const AUTO_CLOSE_TAB_KEY = "fb_auto_close_tab";
 // Phai khop EXT_VERSION trong content.js - neu cu hon thi re-inject lai
-const EXPECTED_EXT_VERSION = 6;
+const EXPECTED_EXT_VERSION = 7;
 
 const buttonDownload = document.getElementById("download");
 const buttonScan = document.getElementById("scan");
@@ -25,13 +25,16 @@ const buttonRunAuto = document.getElementById("runAuto");
 const buttonStopAuto = document.getElementById("stopAuto");
 const countInput = document.getElementById("postCount");
 const loadWaitInput = document.getElementById("loadWait");
-const webUrlInput = document.getElementById("webUrl");
-const apiKeyInput = document.getElementById("apiKey");
+const webConfigInput = document.getElementById("webConfigJson");
 const autoUrlsInput = document.getElementById("autoUrls");
 const autoDelayInput = document.getElementById("autoDelay");
 const autoCloseTabInput = document.getElementById("autoCloseTab");
 const statusEl = document.getElementById("status");
 const resultEl = document.getElementById("result");
+
+// Cau hinh web da luu (nap tu storage luc init, cap nhat khi bam Luu)
+let webUrlState = "";
+let apiKeyState = "";
 
 /**
  * Hien thi text trang thai + class mau cho vung status cua popup.
@@ -208,11 +211,10 @@ chrome.runtime.onMessage.addListener((message) => {
  * @returns {Promise<Object>} Phan hoi tu web
  */
 async function sendToWeb(posts) {
-  const webUrl = webUrlInput.value.trim().replace(/\/+$/, "");
-  const apiKey = apiKeyInput.value.trim();
+  const webUrl = webUrlState.trim().replace(/\/+$/, "");
   const resp = await fetch(webUrl + "/api/extension/analyze", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+    headers: { "Content-Type": "application/json", "X-API-Key": apiKeyState },
     body: JSON.stringify({ posts }),
   });
   const data = await resp.json().catch(() => ({}));
@@ -220,27 +222,47 @@ async function sendToWeb(posts) {
   return data;
 }
 
-buttonSaveConfig.addEventListener("click", () => {
-  const webUrl = webUrlInput.value.trim();
-  const apiKey = apiKeyInput.value.trim();
-  if (!webUrl) {
-    setStatus("Nhap URL web truoc (vd https://xxx.trycloudflare.com).", "error");
+/**
+ * Luu cau hinh web: parse JSON tu 1 o duy nhat roi luu vao storage.
+ *
+ * Logic:
+ *   - Nhan dang {"webUrl": "...", "apiKey": "..."} (copy tu web - nut Copy config)
+ *   - JSON loi / thieu truong -> bao loi ro, khong ghi de config cu
+ *   - Thanh cong: cap nhat webUrlState/apiKeyState + chrome.storage
+ *
+ * @returns {Promise<void>}
+ */
+async function saveWebConfig() {
+  const raw = webConfigInput.value.trim();
+  if (!raw) {
+    setStatus("Dan JSON cau hinh vao o tren (lay tu web - nut Copy config).", "error");
     return;
   }
-  chrome.storage.local.set({ [WEB_URL_KEY]: webUrl, [API_KEY_KEY]: apiKey }).then(() => {
-    setStatus("Da luu cau hinh web. Bam Quet ngay de bat dau.", "ok");
-  });
-});
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    setStatus("JSON khong hop le: " + err.message, "error");
+    return;
+  }
+  const webUrl = String(parsed.webUrl || parsed.url || "").trim();
+  const apiKey = String(parsed.apiKey || parsed.key || "").trim();
+  if (!webUrl || !apiKey) {
+    setStatus("Thieu webUrl hoac apiKey trong JSON.", "error");
+    return;
+  }
+  webUrlState = webUrl;
+  apiKeyState = apiKey;
+  await chrome.storage.local.set({ [WEB_URL_KEY]: webUrl, [API_KEY_KEY]: apiKey });
+  webConfigInput.value = "";
+  setStatus("Da luu cau hinh web. Bam Quet ngay de bat dau.", "ok");
+}
+
+buttonSaveConfig.addEventListener("click", saveWebConfig);
 
 buttonScan.addEventListener("click", async () => {
-  const webUrl = webUrlInput.value.trim();
-  const apiKey = apiKeyInput.value.trim();
-  if (!webUrl) {
-    setStatus("Cau hinh URL web truoc khi quet (o phia tren).", "error");
-    return;
-  }
-  if (!apiKey) {
-    setStatus("Thieu API key - lay tu web (tab Cau hinh API Key).", "error");
+  if (!webUrlState || !apiKeyState) {
+    setStatus("Cau hinh web truoc (dan JSON tu web vao o phia tren roi Luu).", "error");
     return;
   }
   buttonScan.disabled = true;
@@ -340,10 +362,8 @@ function saveAutoConfig() {
  * @returns {Promise<void>}
  */
 async function runAutoCrawl() {
-  const webUrl = webUrlInput.value.trim();
-  const apiKey = apiKeyInput.value.trim();
-  if (!webUrl || !apiKey) {
-    setStatus("Can cau hinh URL web + API key o phia tren truoc.", "error");
+  if (!webUrlState || !apiKeyState) {
+    setStatus("Can cau hinh web o phia tren (dan JSON tu web roi Luu).", "error");
     return;
   }
   const urls = autoUrlsInput.value.split("\n").map((u) => u.trim()).filter(Boolean);
@@ -464,8 +484,8 @@ chrome.storage.local.get([
 ]).then((data) => {
   if (data[POST_COUNT_KEY]) countInput.value = data[POST_COUNT_KEY];
   if (data[LOAD_WAIT_KEY]) loadWaitInput.value = data[LOAD_WAIT_KEY];
-  if (data[WEB_URL_KEY]) webUrlInput.value = data[WEB_URL_KEY];
-  if (data[API_KEY_KEY]) apiKeyInput.value = data[API_KEY_KEY];
+  if (data[WEB_URL_KEY]) webUrlState = data[WEB_URL_KEY];
+  if (data[API_KEY_KEY]) apiKeyState = data[API_KEY_KEY];
   if (data[AUTO_URLS_KEY]) autoUrlsInput.value = data[AUTO_URLS_KEY];
   if (data[AUTO_DELAY_KEY]) autoDelayInput.value = data[AUTO_DELAY_KEY];
   if (data[AUTO_CLOSE_TAB_KEY] === false) autoCloseTabInput.checked = false;

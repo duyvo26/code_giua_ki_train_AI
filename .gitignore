@@ -15,6 +15,9 @@ utils/bot_config.json
 # Bí mật - API key extension không bao giờ commit
 utils/api_keys.json
 
+# Bí mật - lịch hẹn quét tự động không bao giờ commit
+utils/schedules.json
+
 # Môi trường
 .venv/
 venv/

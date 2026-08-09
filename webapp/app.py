@@ -60,6 +60,16 @@ from webapp.api_keys import (  # noqa: E402
 # Lịch sử dữ liệu đã nhận (results/api_history.json, gitignored)
 from webapp.history import append_history, list_history, update_last_history  # noqa: E402
 
+# Lịch hẹn quét tự động (utils/schedules.json, gitignored)
+from webapp.schedules import (  # noqa: E402
+    add_schedule,
+    due_schedules,
+    list_schedules,
+    mark_triggered,
+    remove_schedule,
+    toggle_schedule,
+)
+
 # Trainer v5 yêu cầu callback kế thừa TrainerCallback, nếu không sẽ
 # AttributeError on_init_end khi Trainer gọi các hook (lỗi đã gặp khi
 # dùng class trần trong nút Train của web)
@@ -255,6 +265,11 @@ ENDPOINT_DESCRIPTIONS = {
     "/api/keys/revoke": "Xoá API key (POST)",
     "/api/extension/analyze": "Nhận data từ extension: tự phân tích + tự gửi cảnh báo bot (header X-API-Key)",
     "/api/history": "Lịch sử dữ liệu đã lấy (extension + web), mới nhất trước",
+    "/api/schedules": "Danh sách lịch hẹn quét tự động",
+    "/api/schedules/delete": "Xoá lịch hẹn (POST)",
+    "/api/schedules/toggle": "Bật/tắt lịch hẹn (POST)",
+    "/api/schedules/next": "Lịch hẹn đến giờ cần mở tab (web poll, không đổi trạng thái)",
+    "/api/schedules/ack": "Đánh dấu lịch đã mở tab thành công (POST)",
 }
 
 
@@ -1352,6 +1367,101 @@ def history():
     """
     limit = request.args.get("limit", 50, type=int)
     return jsonify({"entries": list_history(limit)})
+
+
+# =====================================================================
+# Lịch hẹn quét tự động (web mở tab FB ?closetab=true -> extension tự quét)
+# =====================================================================
+
+@app.get("/api/schedules")
+def schedules_list():
+    """Danh sách lịch hẹn quét (URL, khoảng cách, lần chạy gần nhất/kế tiếp)."""
+    return jsonify({"schedules": list_schedules()})
+
+
+@app.post("/api/schedules")
+def schedules_add():
+    """
+    Thêm lịch hẹn quét tự động.
+
+    Logic:
+      - Nhận {url, interval_seconds} (hoặc interval_minutes/interval_hours)
+      - Validate URL chứa facebook.com/groups/ + khoảng cách trong 10s..7 ngày
+      - Lần chạy đầu tiên sau interval_seconds
+    """
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    if "facebook.com/groups/" not in url:
+        return jsonify({"error": "URL phai la trang group Facebook (chua facebook.com/groups/)"}), 400
+
+    seconds = data.get("interval_seconds")
+    if seconds is None:
+        minutes = data.get("interval_minutes")
+        if minutes is not None:
+            seconds = minutes * 60
+        else:
+            seconds = data.get("interval_hours", 5) * 3600
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Khoang cach khong hop le"}), 400
+    if not 10 <= seconds <= 7 * 24 * 3600:
+        return jsonify({"error": "Khoang cach phai trong 10 giay..7 ngay"}), 400
+
+    schedule = add_schedule(url, seconds)
+    return jsonify({"ok": True, "schedule": schedule}), 201
+
+
+@app.post("/api/schedules/delete")
+def schedules_delete():
+    """Xoá 1 lịch hẹn ({id})."""
+    data = request.get_json(silent=True) or {}
+    schedule_id = (data.get("id") or "").strip()
+    if not schedule_id:
+        return jsonify({"error": "Thieu id"}), 400
+    if remove_schedule(schedule_id):
+        return jsonify({"ok": True})
+    return jsonify({"error": "Khong tim thay lich hen"}), 404
+
+
+@app.post("/api/schedules/toggle")
+def schedules_toggle():
+    """Bật/tắt 1 lịch hẹn ({id})."""
+    data = request.get_json(silent=True) or {}
+    schedule_id = (data.get("id") or "").strip()
+    if not schedule_id:
+        return jsonify({"error": "Thieu id"}), 400
+    if toggle_schedule(schedule_id):
+        return jsonify({"ok": True})
+    return jsonify({"error": "Khong tim thay lich hen"}), 404
+
+
+@app.get("/api/schedules/next")
+def schedules_next():
+    """
+    Lịch hẹn ĐẾN GIỜ (web JS poll 10s de mo tab).
+
+    Logic:
+      - Tra {due: [{id, url}]} - KHONG doi trang thai (de popup blocker
+        khong lam mat lich: bi chan thi poll sau van con due)
+      - Sau khi window.open thanh cong, web JS goi POST /api/schedules/ack
+    """
+    return jsonify({"due": due_schedules()})
+
+
+@app.post("/api/schedules/ack")
+def schedules_ack():
+    """
+    Đánh dấu lịch đã mở tab thành công.
+
+    Logic:
+      - Nhận {ids: [...]} - chi ack nhung lich window.open tra ve khac null
+      - Cap nhat last_run_at + next_run_at (= now + interval)
+    """
+    data = request.get_json(silent=True) or {}
+    ids = [str(i).strip() for i in (data.get("ids") or []) if str(i).strip()]
+    updated = mark_triggered(ids)
+    return jsonify({"ok": True, "updated": updated})
 
 
 if __name__ == "__main__":

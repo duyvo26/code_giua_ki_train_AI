@@ -16,7 +16,7 @@ const API_KEY_KEY = "fb_api_key";
 const LOAD_TIMEOUT_MS = 30000;
 const RENDER_PAUSE_MS = 2500;
 // Phai khop EXT_VERSION trong content.js - cu hon thi re-inject lai
-const EXPECTED_EXT_VERSION = 6;
+const EXPECTED_EXT_VERSION = 7;
 
 const crawlState = {
   running: false,
@@ -393,7 +393,15 @@ async function startAutoCrawl(urls, delayMs, limit, closeTab) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.type === "AUTO_TAB_DONE") {
+    // Auto tab (web mo ?closetab=true): content da quet + gui web xong -> DONG TAB
+    if (sender && sender.tab) {
+      chrome.tabs.remove(sender.tab.id).catch(() => {});
+    }
+    sendResponse({ ok: true });
+    return;
+  }
   if (message && message.type === "START_CRAWL") {
     startCrawl(message.posts, message.tabId, message.originalUrl).then(() => {
       sendResponse({ ok: true });

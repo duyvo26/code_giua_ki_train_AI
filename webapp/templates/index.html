@@ -463,6 +463,43 @@ NOI DUNG:
             </div>
         </section>
 
+        <section class="bg-surface border border-border rounded-xl p-5">
+            <h2 class="font-semibold mb-1 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-cyan-400"></span> Hẹn giờ quét tự động
+            </h2>
+            <p class="text-[12px] text-slate-400 mb-4 leading-relaxed">
+                Nhập URL group + khoảng thời gian → đúng giờ web tự mở tab FB (kèm <code class="text-cyan-300 font-mono text-[11px]">?closetab=true</code>)
+                → extension thấy sẽ tự quét bài, gửi về web phân tích + gửi bot, rồi <b class="text-slate-200">tự tắt tab</b>.
+                Giữ tab web này mở để đúng giờ tự chạy (poll 10s). Cần extension đã cấu hình URL web + API key.
+            </p>
+            <div class="flex flex-wrap items-end gap-3 mb-4">
+                <div class="flex-1 min-w-[220px]">
+                    <label for="sch-url" class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">URL group Facebook</label>
+                    <input id="sch-url" type="text" placeholder="https://www.facebook.com/groups/762609615053439"
+                           class="w-full bg-slate-900 border border-border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                </div>
+                <div>
+                    <label for="sch-interval" class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Khoảng cách</label>
+                    <input id="sch-interval" type="number" min="1" max="10080" value="5"
+                           class="w-20 bg-slate-900 border border-border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                </div>
+                <div>
+                    <label for="sch-unit" class="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Đơn vị</label>
+                    <select id="sch-unit"
+                            class="bg-slate-900 border border-border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                        <option value="minutes" selected>Phút</option>
+                        <option value="seconds">Giây</option>
+                        <option value="hours">Giờ</option>
+                    </select>
+                </div>
+                <button id="btn-add-schedule"
+                        class="px-4 py-2 rounded-md bg-cyan-600 hover:bg-cyan-500 text-xs font-semibold transition-colors duration-200 cursor-pointer">
+                    Thêm lịch
+                </button>
+            </div>
+            <div id="schedule-list" class="text-[11px] text-slate-500">Đang tải...</div>
+        </section>
+
     </main>
     </div><!-- /tab-apikey -->
 
@@ -1072,6 +1109,7 @@ NOI DUNG:
             }
             if (name === "apikey") {
                 loadApiKeys();
+                loadSchedules();
             }
             if (name === "history") {
                 loadHistory();
@@ -1808,7 +1846,8 @@ NOI DUNG:
          *
          * Logic:
          *   - GET /api/keys -> {keys: [{key, name, created_at}]}
-         *   - Nut Sao chep: clipboard.writeText -> doi text 1.2s
+         *   - Nut "Copy config": copy JSON {webUrl: location.origin, apiKey: key}
+         *     - dan thang vao 1 o cau hinh cua extension la chay duoc
          *   - Nut Xoa: goi /api/keys/revoke roi tai lai danh sach
          *
          * @returns {Promise<void>}
@@ -1833,8 +1872,8 @@ NOI DUNG:
                                     <td class="py-2 pr-2 text-slate-300">${k.name}</td>
                                     <td class="py-2 pr-2 text-slate-400 whitespace-nowrap">${k.created_at}</td>
                                     <td class="py-2 text-right whitespace-nowrap">
-                                        <button data-copy="${k.key}"
-                                            class="btn-key-copy px-2 py-1 rounded bg-muted hover:bg-slate-700/70 text-[10px] font-medium transition-colors duration-200 cursor-pointer">Sao chép</button>
+                                        <button data-copy="${encodeURIComponent(JSON.stringify({ webUrl: location.origin, apiKey: k.key }))}"
+                                            class="btn-key-copy px-2 py-1 rounded bg-muted hover:bg-slate-700/70 text-[10px] font-medium transition-colors duration-200 cursor-pointer">Copy config</button>
                                         <button data-revoke="${k.key}"
                                             class="btn-key-revoke px-2 py-1 rounded bg-red-950/60 hover:bg-red-900/70 text-red-300 text-[10px] font-medium transition-colors duration-200 cursor-pointer">Xoá</button>
                                     </td>
@@ -1843,9 +1882,9 @@ NOI DUNG:
                     </table>`;
                 box.querySelectorAll(".btn-key-copy").forEach(btn =>
                     btn.addEventListener("click", async () => {
-                        await navigator.clipboard.writeText(btn.dataset.copy);
+                        await navigator.clipboard.writeText(decodeURIComponent(btn.dataset.copy));
                         btn.textContent = "Đã chép";
-                        setTimeout(() => btn.textContent = "Sao chép", 1200);
+                        setTimeout(() => btn.textContent = "Copy config", 1200);
                     }));
                 box.querySelectorAll(".btn-key-revoke").forEach(btn =>
                     btn.addEventListener("click", () => revokeApiKey(btn.dataset.revoke)));
@@ -1876,13 +1915,16 @@ NOI DUNG:
                 });
                 note.classList.remove("hidden");
                 note.innerHTML = `
-                    Key mới (sao chép ngay): <code id="new-key-value" class="font-mono text-emerald-300 break-all">${res.key}</code>
-                    <button id="btn-copy-new-key" class="ml-2 px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-200 text-[10px] font-medium cursor-pointer">Sao chép</button>`;
-                document.getElementById("btn-copy-new-key").addEventListener("click", async () => {
-                    await navigator.clipboard.writeText(res.key);
-                    const copyBtn = document.getElementById("btn-copy-new-key");
+                    Key mới (sao chép config rồi dán thẳng vào extension - 1 ô duy nhất):
+                    <code class="font-mono text-emerald-300 break-all">${res.key}</code>
+                    <button id="btn-copy-new-config" class="ml-2 px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-200 text-[10px] font-medium cursor-pointer">Copy config</button>`;
+                document.getElementById("btn-copy-new-config").addEventListener("click", async () => {
+                    await navigator.clipboard.writeText(
+                        JSON.stringify({ webUrl: location.origin, apiKey: res.key })
+                    );
+                    const copyBtn = document.getElementById("btn-copy-new-config");
                     copyBtn.textContent = "Đã chép";
-                    setTimeout(() => copyBtn.textContent = "Sao chép", 1200);
+                    setTimeout(() => copyBtn.textContent = "Copy config", 1200);
                 });
                 document.getElementById("key-name").value = "";
                 await loadApiKeys();
@@ -1969,6 +2011,178 @@ NOI DUNG:
             }
         }
 
+        // ---------- Hẹn giờ quét tự động ----------
+        /**
+         * Tai danh sach lich hen -> render bang (URL, khoang cach, lan chay,
+         * lan ke tiep, bat/tat, xoa).
+         *
+         * Logic:
+         *   - GET /api/schedules -> {schedules: [...]}
+         *   - Khoang cach hien thi dang doc ("5 phut" / "2 gio" / "30 giay")
+         *   - Nut Bat/Tat: toggle -> tai lai; Nut Xoa: delete -> tai lai
+         *
+         * @returns {Promise<void>}
+         */
+        async function loadSchedules() {
+            const box = document.getElementById("schedule-list");
+            try {
+                const { schedules } = await api("/api/schedules");
+                if (!schedules.length) {
+                    box.innerHTML = '<p class="text-slate-500">Chưa có lịch hẹn nào - nhập URL group + khoảng cách rồi bấm "Thêm lịch".</p>';
+                    return;
+                }
+                const fmtInterval = (s) => {
+                    const sec = s.interval_seconds;
+                    if (sec % 3600 === 0) return (sec / 3600) + " giờ";
+                    if (sec % 60 === 0) return (sec / 60) + " phút";
+                    return sec + " giây";
+                };
+                box.innerHTML = `
+                    <div class="overflow-x-auto">
+                    <table class="w-full text-xs">
+                        <thead><tr class="text-left text-slate-500 border-b border-border">
+                            <th class="py-2 pr-3">URL</th><th class="pr-3">Khoảng cách</th>
+                            <th class="pr-3">Chạy gần nhất</th><th class="pr-3">Kế tiếp</th><th></th>
+                        </tr></thead>
+                        <tbody>
+                            ${schedules.map(s => `
+                                <tr class="border-b border-border/50 ${s.enabled ? "" : "opacity-50"}">
+                                    <td class="py-2 pr-3 font-mono text-cyan-300 break-all max-w-[340px]">${s.url}</td>
+                                    <td class="py-2 pr-3 text-slate-300 whitespace-nowrap">${fmtInterval(s)}</td>
+                                    <td class="py-2 pr-3 text-slate-400 whitespace-nowrap">${s.last_run || "-"}</td>
+                                    <td class="py-2 pr-3 text-slate-300 whitespace-nowrap">${s.next_run || "-"}</td>
+                                    <td class="py-2 text-right whitespace-nowrap">
+                                        <button data-toggle="${s.id}"
+                                            class="btn-sch-toggle px-2 py-1 rounded ${s.enabled ? "bg-amber-950/60 text-amber-300 hover:bg-amber-900/70" : "bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/70"} text-[10px] font-medium transition-colors duration-200 cursor-pointer">${s.enabled ? "Tắt" : "Bật"}</button>
+                                        <button data-del="${s.id}"
+                                            class="btn-sch-del px-2 py-1 rounded bg-red-950/60 hover:bg-red-900/70 text-red-300 text-[10px] font-medium transition-colors duration-200 cursor-pointer">Xoá</button>
+                                    </td>
+                                </tr>`).join("")}
+                        </tbody>
+                    </table>
+                    </div>`;
+                box.querySelectorAll(".btn-sch-toggle").forEach(btn =>
+                    btn.addEventListener("click", () => toggleSchedule(btn.dataset.toggle)));
+                box.querySelectorAll(".btn-sch-del").forEach(btn =>
+                    btn.addEventListener("click", () => deleteSchedule(btn.dataset.del)));
+            } catch (err) {
+                box.innerHTML = `<p class="text-red-400 text-xs">${err.message}</p>`;
+            }
+        }
+
+        /**
+         * Them lich hen moi (POST /api/schedules) roi tai lai danh sach.
+         *
+         * Logic:
+         *   - Validate URL chua facebook.com/groups/ + khoang cach >= 1
+         *   - Doi don vi giay/phut/gio -> interval_seconds
+         *
+         * @returns {Promise<void>}
+         */
+        async function addSchedule() {
+            const url = document.getElementById("sch-url").value.trim();
+            const interval = parseInt(document.getElementById("sch-interval").value, 10);
+            const unit = document.getElementById("sch-unit").value;
+            const note = document.getElementById("schedule-list");
+            if (!url.includes("facebook.com/groups/")) {
+                note.innerHTML = '<p class="text-red-400 text-xs">URL phai la trang group Facebook.</p>';
+                return;
+            }
+            if (!interval || interval < 1) {
+                note.innerHTML = '<p class="text-red-400 text-xs">Khoang cach phai >= 1.</p>';
+                return;
+            }
+            try {
+                const body = { url };
+                if (unit === "seconds") body.interval_seconds = interval;
+                else if (unit === "hours") body.interval_hours = interval;
+                else body.interval_minutes = interval;
+                await api("/api/schedules", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                document.getElementById("sch-url").value = "";
+                await loadSchedules();
+            } catch (err) {
+                note.innerHTML = `<p class="text-red-400 text-xs">${err.message}</p>`;
+            }
+        }
+
+        /**
+         * Xoa 1 lich hen (POST /api/schedules/delete) roi tai lai.
+         *
+         * @param {string} id - ID lich hen
+         * @returns {Promise<void>}
+         */
+        async function deleteSchedule(id) {
+            try {
+                await api("/api/schedules/delete", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id }),
+                });
+                await loadSchedules();
+            } catch (err) {
+                document.getElementById("schedule-list").innerHTML =
+                    `<p class="text-red-400 text-xs">${err.message}</p>`;
+            }
+        }
+
+        /**
+         * Bat/tat 1 lich hen (POST /api/schedules/toggle) roi tai lai.
+         *
+         * @param {string} id - ID lich hen
+         * @returns {Promise<void>}
+         */
+        async function toggleSchedule(id) {
+            try {
+                await api("/api/schedules/toggle", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id }),
+                });
+                await loadSchedules();
+            } catch (err) {
+                document.getElementById("schedule-list").innerHTML =
+                    `<p class="text-red-400 text-xs">${err.message}</p>`;
+            }
+        }
+
+        /**
+         * Poll lich den gio (10s): mo tab FB kem ?closetab=true roi ack.
+         *
+         * Logic:
+         *   - GET /api/schedules/next -> {due: [{id, url}]} (khong doi trang thai)
+         *   - Moi lich: window.open(url + "?closetab=true", "_blank")
+         *   - Chi ACK lich nao window.open tra ve khac null (mo thanh cong).
+         *     Bi popup blocker chan (null) -> khong ack -> poll sau con due
+         *   - Extension thay ?closetab=true -> tu quet + gui web + tu tat tab
+         *
+         * @returns {Promise<void>}
+         */
+        async function pollScheduleNext() {
+            try {
+                const { due } = await api("/api/schedules/next");
+                if (!due.length) return;
+                const acked = [];
+                for (const item of due) {
+                    const sep = item.url.includes("?") ? "&" : "?";
+                    const opened = window.open(item.url + sep + "closetab=true", "_blank");
+                    if (opened) acked.push(item.id);
+                }
+                if (acked.length) {
+                    await api("/api/schedules/ack", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ ids: acked }),
+                    });
+                }
+            } catch (_err) {
+                // loi poll nho - bo qua, lan poll sau thu lai
+            }
+        }
+
         // ---------- Khởi tạo ----------
         document.querySelectorAll(".tab-btn").forEach(btn =>
             btn.addEventListener("click", () => switchTab(btn.dataset.tab)));
@@ -2011,6 +2225,10 @@ NOI DUNG:
         if (savedThreshold) fbEl("fb-threshold").value = savedThreshold;
         // Cấu hình API key
         document.getElementById("btn-gen-key").addEventListener("click", generateApiKey);
+        // Hẹn giờ quét tự động
+        document.getElementById("btn-add-schedule").addEventListener("click", addSchedule);
+        // Poll lịch hẹn mỗi 10s - chạy toàn trang, không phụ thuộc tab đang mở
+        setInterval(pollScheduleNext, 10000);
         // Lịch sử
         document.getElementById("btn-refresh-history").addEventListener("click", loadHistory);
 

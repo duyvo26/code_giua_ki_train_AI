@@ -53,10 +53,9 @@
   <input type="number" id="postCount" min="1" max="50" value="5">
   <label for="loadWait">Thoi gian cho load moi lan cuon (ms):</label>
   <input type="number" id="loadWait" min="500" max="10000" step="500" value="3000">
-  <label for="webUrl">URL web (bat buoc de quet):</label>
-  <input type="text" id="webUrl" placeholder="https://xxx.trycloudflare.com">
-  <label for="apiKey">API key (lay tu web - tab Cau hinh API Key):</label>
-  <input type="password" id="apiKey" placeholder="32 ky tu tu tab Cau hinh API Key">
+  <div class="section-title">Cau hinh web</div>
+  <label for="webConfigJson">Dan JSON tu web (nut "Copy config" - tab Cau hinh API Key):</label>
+  <input type="text" id="webConfigJson" placeholder='{"webUrl":"https://xxx.trycloudflare.com","apiKey":"32-ky-tu"}'>
   <button id="saveConfig" class="secondary">Luu cau hinh web</button>
   <button id="scan">Quet ngay + gui ve web</button>
   <div class="section-title">Cau hinh trang auto</div>

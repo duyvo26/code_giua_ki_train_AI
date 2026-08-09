@@ -307,6 +307,8 @@ function collectPostsWithComments(limit) {
 const STORAGE_KEY = "fb_posts";
 const POST_COUNT_KEY = "fb_post_count";
 const LOAD_WAIT_KEY = "fb_load_wait";
+const WEB_URL_KEY = "fb_web_url";
+const API_KEY_KEY = "fb_api_key";
 
 // Auto-scroll: cuon tung buoc, cho lazy-load roi thu thap cong don
 const SCROLL_STEP_PX = 1200;
@@ -321,7 +323,7 @@ let lastSavedSignature = "";
 
 // Version content script - popup kiem tra de tu inject lai khi script cu
 // con song trong tab da mo (sau khi reload extension ma chua F5 trang)
-const EXT_VERSION = 6;
+const EXT_VERSION = 7;
 
 /**
  * Doc so bai toi da tu chrome.storage.local va cap nhat bien postLimit.
@@ -497,6 +499,97 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes[LOAD_WAIT_KEY]) applyLoadWait();
   }
 });
+
+/* --- AUTO TAB (web mo ?closetab=true): tu quet -> gui web -> bao tat tab --- */
+
+/**
+ * Gui bai viet ve web /api/extension/analyze (doc webUrl+apiKey tu storage).
+ *
+ * Logic:
+ *   - Dung trong auto tab: web mo trang group kem ?closetab=true, content
+ *     tu quet xong roi gui thang len web (khong can popup)
+ *   - Loi (chua cau hinh web / HTTP loi) -> tra {ok: false, message}
+ *
+ * @param {Array} posts - Danh sach bai da quet ({url, postText, comments})
+ * @returns {Promise<{ok: boolean, message: string}>} Ket qua gui
+ */
+async function sendPostsToWeb(posts) {
+  const { [WEB_URL_KEY]: webUrl, [API_KEY_KEY]: apiKey } = await chrome.storage.local.get([
+    WEB_URL_KEY,
+    API_KEY_KEY,
+  ]);
+  if (!webUrl || !apiKey) {
+    return { ok: false, message: "chua cau hinh web trong extension" };
+  }
+  try {
+    const resp = await fetch(webUrl.replace(/\/+$/, "") + "/api/extension/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({ posts }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    return { ok: resp.ok, message: data.message || data.error || ("HTTP " + resp.status) };
+  } catch (err) {
+    return { ok: false, message: "loi gui web: " + err.message };
+  }
+}
+
+/**
+ * Auto tab: web mo trang group kem ?closetab=true -> tu quet + gui web + tat.
+ *
+ * Logic:
+ *   - B1: doc postLimit tu storage, chay autoScrollScan (tu cuon lay du bai)
+ *   - B2: co bai moi -> sendPostsToWeb() (web tu phan tich + tu gui bot)
+ *   - B3: bao background AUTO_TAB_DONE de DONG TAB (fallback window.close)
+ *   - Co loi gi cung phai bao tat tab (auto tab khong can giu lai)
+ *
+ * @returns {Promise<void>}
+ */
+async function runAutoTab() {
+  const { [POST_COUNT_KEY]: count } = await chrome.storage.local.get(POST_COUNT_KEY);
+  const limit = parseInt(count, 10) || 5;
+  const result = await autoScrollScan(limit);
+  let sent = null;
+  if (result.posts.length > 0) {
+    sent = await sendPostsToWeb(result.posts);
+  }
+  try {
+    await chrome.runtime.sendMessage({
+      type: "AUTO_TAB_DONE",
+      posts: result.posts.length,
+      sent,
+      stopped: result.stopped,
+    });
+  } catch (_err) {
+    // Background khong lang nghe - tu dong close tab (tab do window.open tao)
+    try {
+      window.close();
+    } catch (_e2) {
+      // khong close duoc - bo qua
+    }
+  }
+}
+
+/**
+ * Kiem tra URL co ?closetab=true khong - web mo tab dung gio de extension
+ * tu quet. Dung thi cho trang load xong roi chay runAutoTab().
+ *
+ * Logic:
+ *   - Chi chay khi param closetab=true (web luon them khi mo tab hen gio)
+ *   - Cho 4s de Facebook render feed truoc khi quet
+ */
+function maybeRunAutoTab() {
+  try {
+    if (new URLSearchParams(location.search).get("closetab") === "true") {
+      setTimeout(() => {
+        runAutoTab().catch(() => {});
+      }, 4000);
+    }
+  } catch (_err) {
+    // loi nho - bo qua
+  }
+}
+maybeRunAutoTab();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message && message.type === "PING") {
