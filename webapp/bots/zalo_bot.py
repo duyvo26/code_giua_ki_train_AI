@@ -52,12 +52,16 @@ class ZaloBot:
         Token nằm trong URL path (chuẩn Bot Creator).
 
         Logic:
+          - Chấp nhận token có hoặc không có tiền tố "bot" (tránh URL
+            /botbot.../ khi người dùng dán cả chuỗi từ trang cấu hình)
           - Response luôn là JSON {ok: true/false, error_code, description}
           - Nếu server trả không phải JSON (vd trang 404 HTML) -> trả
             dict lỗi chuẩn thay vì để exception crash bot thread
         """
         cfg = self._cfg()
         token = cfg["token"].strip()
+        if token.startswith("bot"):
+            token = token[3:]
         base = (cfg.get("api_base") or "https://bot-api.zaloplatforms.com").rstrip("/")
         resp = requests.post(
             f"{base}/bot{token}/{method}",
