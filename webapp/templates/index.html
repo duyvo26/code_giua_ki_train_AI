@@ -83,6 +83,10 @@
                 class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-border bg-muted text-slate-400 hover:text-slate-200 transition-colors duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:outline-none">
             Cấu hình API Key
         </button>
+        <button data-tab="history"
+                class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-border bg-muted text-slate-400 hover:text-slate-200 transition-colors duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none">
+            Lịch sử
+        </button>
     </nav>
 
     <div id="tab-overview">
@@ -461,6 +465,31 @@ NOI DUNG:
 
     </main>
     </div><!-- /tab-apikey -->
+
+    <div id="tab-history" class="hidden">
+    <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+        <section class="bg-surface border border-border rounded-xl p-5">
+            <div class="flex items-start justify-between gap-3 mb-4">
+                <div>
+                    <h2 class="font-semibold mb-1 flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-cyan-400"></span> Lịch sử dữ liệu đã lấy
+                    </h2>
+                    <p class="text-[12px] text-slate-400 leading-relaxed">
+                        Mỗi lượt extension gửi data về (hoặc phân tích thủ công trên web) được ghi 1 bản ghi:
+                        số bài, bình luận, tiêu cực theo ngưỡng, và bot nào đã tự nhận cảnh báo.
+                    </p>
+                </div>
+                <button id="btn-refresh-history"
+                        class="px-3 py-1.5 rounded-md bg-muted hover:bg-slate-700/70 text-[11px] font-medium transition-colors duration-200 cursor-pointer whitespace-nowrap">
+                    Làm mới
+                </button>
+            </div>
+            <div id="history-list" class="text-[11px] text-slate-500">Đang tải...</div>
+        </section>
+
+    </main>
+    </div><!-- /tab-history -->
 
     <footer class="max-w-7xl mx-auto px-4 pb-8 text-center text-[11px] text-slate-600">
         Máy học nâng cao - 25MIT-1A | PhoBERT-base-v2 fine-tuned trên UIT-VSFC | Dữ liệu xử lý 100% cục bộ
@@ -1019,6 +1048,7 @@ NOI DUNG:
             document.getElementById("tab-bots").classList.toggle("hidden", name !== "bots");
             document.getElementById("tab-fb").classList.toggle("hidden", name !== "fb");
             document.getElementById("tab-apikey").classList.toggle("hidden", name !== "apikey");
+            document.getElementById("tab-history").classList.toggle("hidden", name !== "history");
             document.querySelectorAll(".tab-btn").forEach(b => {
                 const active = b.dataset.tab === name;
                 b.classList.toggle("bg-surface", active);
@@ -1042,6 +1072,9 @@ NOI DUNG:
             }
             if (name === "apikey") {
                 loadApiKeys();
+            }
+            if (name === "history") {
+                loadHistory();
             }
         }
 
@@ -1872,6 +1905,58 @@ NOI DUNG:
             }
         }
 
+        // ---------- Lịch sử dữ liệu đã lấy ----------
+        /**
+         * Tai lich su data da lay -> render bang (thoi gian, nguon, bai,
+         * binh luan, tieu cuc, nguong, bot da gui).
+         *
+         * Logic:
+         *   - GET /api/history -> {entries: [...]} moi nhat truoc
+         *   - source: extension (do) / web (xanh)
+         *   - sent_to rong -> hien "-"; co bot -> hien ten bot (theo nguong)
+         *   - Chua co ban ghi -> hien ghi chu
+         *
+         * @returns {Promise<void>}
+         */
+        async function loadHistory() {
+            const box = document.getElementById("history-list");
+            try {
+                const { entries } = await api("/api/history");
+                if (!entries.length) {
+                    box.innerHTML = '<p class="text-slate-500">Chưa có dữ liệu - extension quét và gửi về web sẽ xuất hiện ở đây.</p>';
+                    return;
+                }
+                const sourceBadge = (s) => s === "extension"
+                    ? '<span class="px-1.5 py-0.5 rounded bg-rose-950/60 text-rose-300 border border-rose-900 text-[10px] font-medium">extension</span>'
+                    : '<span class="px-1.5 py-0.5 rounded bg-sky-950/60 text-sky-300 border border-sky-900 text-[10px] font-medium">web</span>';
+                box.innerHTML = `
+                    <div class="overflow-x-auto">
+                    <table class="w-full text-xs">
+                        <thead><tr class="text-left text-slate-500 border-b border-border">
+                            <th class="py-2 pr-3">Thời gian</th><th class="pr-3">Nguồn</th>
+                            <th class="pr-3 text-right">Bài</th><th class="pr-3 text-right">Bình luận</th>
+                            <th class="pr-3 text-right">Tiêu cực</th><th class="pr-3 text-right">Ngưỡng</th>
+                            <th>Bot gửi</th>
+                        </tr></thead>
+                        <tbody>
+                            ${entries.map(e => `
+                                <tr class="border-b border-border/50">
+                                    <td class="py-2 pr-3 font-mono text-slate-300 whitespace-nowrap">${e.ts}</td>
+                                    <td class="py-2 pr-3">${sourceBadge(e.source)}</td>
+                                    <td class="py-2 pr-3 text-right text-slate-200">${e.posts}</td>
+                                    <td class="py-2 pr-3 text-right text-slate-300">${e.comments}</td>
+                                    <td class="py-2 pr-3 text-right font-semibold ${e.negative > 0 ? "text-red-400" : "text-emerald-400"}">${e.negative}</td>
+                                    <td class="py-2 pr-3 text-right text-slate-400">${e.threshold != null ? e.threshold.toFixed(0) + "%" : "-"}</td>
+                                    <td class="py-2 text-slate-300">${(e.sent_to || []).length ? e.sent_to.map(t => t === "telegram" ? "Telegram" : "Zalo").join(" + ") : '<span class="text-slate-500">-</span>'}</td>
+                                </tr>`).join("")}
+                        </tbody>
+                    </table>
+                    </div>`;
+            } catch (err) {
+                box.innerHTML = `<p class="text-red-400 text-xs">${err.message}</p>`;
+            }
+        }
+
         // ---------- Khởi tạo ----------
         document.querySelectorAll(".tab-btn").forEach(btn =>
             btn.addEventListener("click", () => switchTab(btn.dataset.tab)));
@@ -1914,6 +1999,8 @@ NOI DUNG:
         if (savedThreshold) fbEl("fb-threshold").value = savedThreshold;
         // Cấu hình API key
         document.getElementById("btn-gen-key").addEventListener("click", generateApiKey);
+        // Lịch sử
+        document.getElementById("btn-refresh-history").addEventListener("click", loadHistory);
 
         loadModelInfo();
         loadTrainConfig();

@@ -57,6 +57,9 @@ from webapp.api_keys import (  # noqa: E402
     revoke_api_key,
 )
 
+# Lịch sử dữ liệu đã nhận (results/api_history.json, gitignored)
+from webapp.history import append_history, list_history, update_last_history  # noqa: E402
+
 # Trainer v5 yêu cầu callback kế thừa TrainerCallback, nếu không sẽ
 # AttributeError on_init_end khi Trainer gọi các hook (lỗi đã gặp khi
 # dùng class trần trong nút Train của web)
@@ -251,6 +254,7 @@ ENDPOINT_DESCRIPTIONS = {
     "/api/keys/generate": "Sinh API key mới (POST)",
     "/api/keys/revoke": "Xoá API key (POST)",
     "/api/extension/analyze": "Nhận data từ extension: tự phân tích + tự gửi cảnh báo bot (header X-API-Key)",
+    "/api/history": "Lịch sử dữ liệu đã lấy (extension + web), mới nhất trước",
 }
 
 
@@ -1004,8 +1008,20 @@ def _send_alert_to_bots(analysis: dict, threshold: float) -> list[str]:
     return sent_to
 
 
-def _run_fb_analyze(posts, model, tokenizer, threshold: float) -> None:
-    """Thread nền: phân tích từng bình luận, lưu fb_analysis.json + log."""
+def _run_fb_analyze(posts, model, tokenizer, threshold: float, source: str = "web") -> None:
+    """
+    Thread nền: phân tích từng bình luận, lưu fb_analysis.json + log + lịch sử.
+
+    Logic:
+      - Duyệt từng bài -> từng bình luận: predict_sentiment() -> negative?
+      - Lưu fb_analysis.json (web + extension đọc lại để gửi bot)
+      - Ghi 1 bản ghi lịch sử (results/api_history.json): số bài, bình luận,
+        tiêu cực, ngưỡng, nguồn ("extension" hay "web")
+
+    Args:
+        source (str): "web" = phân tích thủ công trên tab FB,
+            "extension" = data từ extension gửi về
+    """
     _append_log(f"=== BAT DAU PHAN TICH BINH LUAN FACEBOOK (nguong {threshold:.0f}%) ===", "INFO")
     analyzed_posts = []
     total_negative = 0
@@ -1054,6 +1070,20 @@ def _run_fb_analyze(posts, model, tokenizer, threshold: float) -> None:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         (RESULTS_DIR / "fb_analysis.json").write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    # Lịch sử "đã lấy": mỗi lượt phân tích ghi 1 bản ghi
+    with contextlib.suppress(Exception):
+        append_history(
+            {
+                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "source": source,
+                "posts": payload["total_posts"],
+                "comments": payload["total_comments"],
+                "negative": total_negative,
+                "threshold": threshold,
+                "sent_to": [],
+                "urls": [p.get("url", "") for p in posts if p.get("url")][:10],
+            }
         )
     _append_log(
         f"PHAN TICH XONG: {payload['total_posts']} bai, {payload['total_comments']} binh luan, "
@@ -1266,16 +1296,38 @@ def _run_extension_analyze(posts, model, tokenizer, threshold: float) -> None:
         f"=== EXTENSION: nhan {len(posts)} bai, dang phan tich (nguong {threshold:.0f}%)... ===",
         "INFO",
     )
-    _run_fb_analyze(posts, model, tokenizer, threshold)
+    _run_fb_analyze(posts, model, tokenizer, threshold, source="extension")
     try:
         analysis_file = RESULTS_DIR / "fb_analysis.json"
         if analysis_file.exists():
             analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
             sent_to = _send_alert_to_bots(analysis, threshold)
+            # Cập nhật lịch sử: bot nào đã nhận cảnh báo tự động
+            with contextlib.suppress(Exception):
+                update_last_history({"sent_to": sent_to})
             if sent_to:
                 _append_log(f"EXTENSION XONG: da tu gui canh bao qua: {', '.join(sent_to)}", "INFO")
     except Exception as exc:  # noqa: BLE001 - lỗi gửi bot không dừng luồng
         _append_log(f"LOI tu gui canh bao bot: {exc}", "ERROR")
+
+
+# =====================================================================
+# Lịch sử dữ liệu đã lấy
+# =====================================================================
+
+@app.get("/api/history")
+def history():
+    """
+    Lịch sử dữ liệu đã lấy (từ extension gửi về + phân tích thủ công).
+
+    Logic:
+      - Đọc results/api_history.json (gitignored), mới nhất trước
+      - Mỗi bản ghi: thời gian, nguồn (extension/web), số bài, bình luận,
+        tiêu cực, ngưỡng, bot đã gửi cảnh báo
+      - ?limit=N để lấy nhiều hơn (mặc định 50, tối đa 200)
+    """
+    limit = request.args.get("limit", 50, type=int)
+    return jsonify({"entries": list_history(limit)})
 
 
 if __name__ == "__main__":
