@@ -544,27 +544,27 @@ function ensureAutoBar() {
     autoBarShadow.innerHTML = `
       <style>
         .bar {
-          display: flex; align-items: center; gap: 10px;
-          padding: 6px 14px; font-size: 12px; font-weight: 600;
+          display: flex; align-items: center; gap: 12px;
+          padding: 10px 18px; font-size: 14px; font-weight: 600;
           color: var(--fg); background: var(--bg);
           border-bottom: 1px solid var(--border);
           box-shadow: 0 2px 10px rgba(0,0,0,0.25);
           transition: background 0.3s ease;
         }
         .spinner {
-          width: 12px; height: 12px; border-radius: 50%;
-          border: 2px solid rgba(255,255,255,0.35);
+          width: 16px; height: 16px; border-radius: 50%;
+          border: 3px solid rgba(255,255,255,0.35);
           border-top-color: #fff;
           animation: fbspin 0.8s linear infinite;
           flex-shrink: 0;
         }
         .spinner.hidden { display: none; }
         @keyframes fbspin { to { transform: rotate(360deg); } }
-        .title { font-weight: 700; white-space: nowrap; flex-shrink: 0; }
-        .msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .title { font-weight: 700; white-space: nowrap; flex-shrink: 0; font-size: 14px; }
+        .msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
         .count {
-          flex-shrink: 0; padding: 1px 8px; border-radius: 10px;
-          background: rgba(255,255,255,0.2); font-size: 11px;
+          flex-shrink: 0; padding: 2px 10px; border-radius: 12px;
+          background: rgba(255,255,255,0.2); font-size: 12.5px;
           font-variant-numeric: tabular-nums;
         }
         .count.hidden { display: none; }
