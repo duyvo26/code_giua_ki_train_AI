@@ -154,9 +154,9 @@ buttonScan.addEventListener("click", async () => {
       setStatus(
         "Quet xong: KHONG co bai nao co binh luan cong khai trong tam nhin." +
         " Cuon them roi quet lai. [debug: group=" + (resp ? resp.groupId : "?") +
-        " mountRoots=" + dbg.rootCount + " articles=" + dbg.articleCount +
-        " comments=" + dbg.commentCount + " containers=" + dbg.containers +
-        " mountPath=" + dbg.mountFound + "]",
+        " mountRoots=" + dbg.rootCount + " feed=" + dbg.feedCount +
+        " articles=" + dbg.articleCount + " comments=" + dbg.commentCount +
+        " containers=" + dbg.containers + " mountPath=" + dbg.mountFound + "]",
         "error"
       );
     }

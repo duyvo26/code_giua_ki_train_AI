@@ -62,12 +62,25 @@ function cleanText(text) {
 function findPostContainers() {
   const containers = [];
   let mountFound = false;
+
+  // 1) Feed sematic: moi child cua [role="feed"] la 1 bai viet
+  const feed = document.querySelector('[role="feed"]');
+  if (feed) {
+    for (const child of feed.children) {
+      if (child.querySelector('a[href*="/posts/"], a[href*="story_fbid"], a[href*="permalink"]')) {
+        containers.push(child);
+      }
+    }
+    if (containers.length > 0) return { containers, mountFound: true };
+  }
+
+  // 2) Path cu the (FB 2026): mount_0_* > div > div[1] > div > div[3] > ... > div[2] > div
   const roots = document.querySelectorAll('[id^="mount_0_"]');
   for (const root of roots) {
     const base = root.querySelector(
-      "div > div:nth-child(1) > div:nth-child(3) > div > div > div:nth-child(1) > " +
-        "div:nth-child(1) > div:nth-child(4) > div > div > div > div:nth-child(2) > " +
-        "div > div > div:nth-child(1) > div:nth-child(2) > div"
+      "div > div:nth-child(1) > div > div:nth-child(3) > div > div > " +
+        "div:nth-child(1) > div:nth-child(1) > div:nth-child(4) > div > div > div > " +
+        "div:nth-child(2) > div > div > div:nth-child(1) > div:nth-child(2) > div"
     );
     if (base) {
       mountFound = true;
@@ -79,6 +92,8 @@ function findPostContainers() {
     }
   }
   if (containers.length > 0) return { containers, mountFound };
+
+  // 3) Fallback cuoi: bat ky [role="article"] khong nam trong comment
   const articles = Array.from(document.querySelectorAll('[role="article"]')).filter(
     (a) => !a.closest("[data-commentid]")
   );
@@ -89,7 +104,8 @@ function scanDiagnostics() {
   const rootCount = document.querySelectorAll('[id^="mount_0_"]').length;
   const articleCount = document.querySelectorAll('[role="article"]').length;
   const commentCount = document.querySelectorAll("[data-commentid]").length;
-  return { rootCount, articleCount, commentCount };
+  const feedCount = document.querySelectorAll('[role="feed"]').length;
+  return { rootCount, articleCount, commentCount, feedCount };
 }
 
 function extractCommentsFromPost(container) {
