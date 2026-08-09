@@ -319,6 +319,10 @@ let postLimit = 5;
 let loadWaitMs = DEFAULT_LOAD_WAIT_MS;
 let lastSavedSignature = "";
 
+// Version content script - popup kiem tra de tu inject lai khi script cu
+// con song trong tab da mo (sau khi reload extension ma chua F5 trang)
+const EXT_VERSION = 5;
+
 /**
  * Doc so bai toi da tu chrome.storage.local va cap nhat bien postLimit.
  *
@@ -430,7 +434,7 @@ async function saveMerged(posts) {
 async function autoScrollScan(limit, onProgress) {
   const groupId = currentGroupId();
   if (!groupId || !location.href.includes("/groups/")) {
-    return { posts: [], groupId: null, stopped: "no_group", scrolls: 0 };
+    return { posts: [], groupId: null, stopped: "no_group", scrolls: 0, debug: scanDiagnostics() };
   }
   const limitPosts = limit && limit > 0 ? limit : postLimit;
   const allPosts = [];
@@ -496,7 +500,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message && message.type === "PING") {
-    sendResponse({ ok: true });
+    // Kem version de popup phat hien content script cu con song trong tab
+    sendResponse({ ok: true, version: EXT_VERSION });
   } else if (message && message.type === "AUTO_SCAN") {
     // Auto-scroll async: tra loi sau khi xong, bao tien trinh moi buoc
     autoScrollScan(message.limit || postLimit, (prog) => {

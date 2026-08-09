@@ -12,6 +12,8 @@ const POST_COUNT_KEY = "fb_post_count";
 const LOAD_WAIT_KEY = "fb_load_wait";
 const WEB_URL_KEY = "fb_web_url";
 const API_KEY_KEY = "fb_api_key";
+// Phai khop EXT_VERSION trong content.js - neu cu hon thi re-inject lai
+const EXPECTED_EXT_VERSION = 5;
 
 const buttonDownload = document.getElementById("download");
 const buttonScan = document.getElementById("scan");
@@ -243,17 +245,36 @@ buttonScan.addEventListener("click", async () => {
       return;
     }
     try {
-      await chrome.tabs.sendMessage(tab.id, { type: "PING" });
-    } catch (_err) {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+      let ping;
+      try {
+        ping = await chrome.tabs.sendMessage(tab.id, { type: "PING" });
+      } catch (_err) {
+        ping = null; // content script chua duoc inject
+      }
+      // Content script cu (sau khi reload extension ma chua F5 tab) se khong
+      // hieu AUTO_SCAN -> tu inject lai ban moi roi quet tiep
+      if (!ping || ping.version !== EXPECTED_EXT_VERSION) {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+      }
+    } catch (err) {
+      setStatus("Khong inject duoc content script: " + err.message, "error");
+      return;
     }
     const limit = parseInt(countInput.value, 10) || 5;
     const resp = await chrome.tabs.sendMessage(tab.id, { type: "AUTO_SCAN", limit });
-    if (!resp || resp.count === 0) {
+    if (resp === null || resp === undefined) {
+      setStatus(
+        "Khong nhan duoc phan hoi tu trang. Vao chrome://extensions bam Reload " +
+        "extension, roi F5 lai trang group.",
+        "error"
+      );
+      return;
+    }
+    if (!resp.count) {
       const dbg = (resp && resp.debug) || {};
       setStatus(
         "Quet xong: KHONG co bai nao co binh luan cong khai." +
-        " [debug: group=" + (resp ? resp.groupId : "?") +
+        " [debug: group=" + (resp.groupId || "?") +
         " mountRoots=" + dbg.rootCount + " feed=" + dbg.feedCount +
         " articles=" + dbg.articleCount + " comments=" + dbg.commentCount +
         " containers=" + dbg.containers + " mountPath=" + dbg.mountFound + "]",
