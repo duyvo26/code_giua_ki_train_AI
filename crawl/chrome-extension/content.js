@@ -323,7 +323,7 @@ let lastSavedSignature = "";
 
 // Version content script - popup kiem tra de tu inject lai khi script cu
 // con song trong tab da mo (sau khi reload extension ma chua F5 trang)
-const EXT_VERSION = 8;
+const EXT_VERSION = 9;
 
 /**
  * Doc so bai toi da tu chrome.storage.local va cap nhat bien postLimit.
@@ -548,7 +548,7 @@ async function sendPostsToWeb(posts) {
  *   - B3: bao background AUTO_TAB_DONE de DONG TAB (fallback window.close)
  *   - Co loi gi cung phai bao tat tab (auto tab khong can giu lai)
  *
- * @returns {Promise<void>}
+ * @returns {Promise<{posts: number, sent: Object|null, stopped: string}>} Tom tat
  */
 async function runAutoTab() {
   const { [POST_COUNT_KEY]: count } = await chrome.storage.local.get(POST_COUNT_KEY);
@@ -558,13 +558,9 @@ async function runAutoTab() {
   if (result.posts.length > 0) {
     sent = await sendPostsToWeb(result.posts);
   }
+  const summary = { posts: result.posts.length, sent, stopped: result.stopped };
   try {
-    await chrome.runtime.sendMessage({
-      type: "AUTO_TAB_DONE",
-      posts: result.posts.length,
-      sent,
-      stopped: result.stopped,
-    });
+    await chrome.runtime.sendMessage({ type: "AUTO_TAB_DONE", ...summary });
   } catch (_err) {
     // Background khong lang nghe - tu dong close tab (tab do window.open tao)
     try {
@@ -573,28 +569,8 @@ async function runAutoTab() {
       // khong close duoc - bo qua
     }
   }
+  return summary;
 }
-
-/**
- * Kiem tra URL co ?closetab=true khong - web mo tab dung gio de extension
- * tu quet. Dung thi cho trang load xong roi chay runAutoTab().
- *
- * Logic:
- *   - Chi chay khi param closetab=true (web luon them khi mo tab hen gio)
- *   - Cho 4s de Facebook render feed truoc khi quet
- */
-function maybeRunAutoTab() {
-  try {
-    if (new URLSearchParams(location.search).get("closetab") === "true") {
-      setTimeout(() => {
-        runAutoTab().catch(() => {});
-      }, 4000);
-    }
-  } catch (_err) {
-    // loi nho - bo qua
-  }
-}
-maybeRunAutoTab();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message && message.type === "PING") {
@@ -620,6 +596,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         debug: result.debug || null,
       });
     });
+    return true;
+  } else if (message && message.type === "AUTO_TAB") {
+    // Background phat hien tab ?closetab=true -> chay auto: quet + gui web
+    runAutoTab()
+      .then((summary) => sendResponse(summary || {}))
+      .catch((err) => sendResponse({ error: String((err && err.message) || err) }));
     return true;
   } else if (message && message.type === "SCAN_DEBUG") {
     sendResponse({ ...scanDiagnostics(), groupId: currentGroupId(), url: location.href });

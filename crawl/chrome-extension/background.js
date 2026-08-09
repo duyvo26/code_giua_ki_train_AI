@@ -11,7 +11,7 @@ const CRAWL_STATE_KEY = "fb_crawl_state";
 const LOAD_TIMEOUT_MS = 30000;
 const RENDER_PAUSE_MS = 2500;
 // Phai khop EXT_VERSION trong content.js - cu hon thi re-inject lai
-const EXPECTED_EXT_VERSION = 8;
+const EXPECTED_EXT_VERSION = 9;
 
 const crawlState = {
   running: false,
@@ -22,6 +22,70 @@ const crawlState = {
   done: 0,
   error: "",
 };
+
+// Theo doi tab auto (?closetab=true): web he gio mo tab -> extension tu quet
+const handledAutoTabs = new Set();
+const AUTO_TAB_SETTLE_MS = 4000; // cho Facebook render feed truoc khi quet
+const AUTO_TAB_RETRY = 3;        // so lan thu lai khi trang chua san sang
+
+/**
+ * Xu ly 1 tab auto (?closetab=true): cho load -> dam bao content script moi
+ * -> bao content chay AUTO_TAB (tu quet + gui web) -> hien badge trang thai.
+ *
+ * Logic:
+ *   - Background bat URL qua chrome.tabs.onUpdated NGAY khi tab duoc mo
+ *     (truoc khi Facebook co the viet lai URL lam mat param ?closetab=true)
+ *   - Cho AUTO_TAB_SETTLE_MS de FB render feed
+ *   - ensureContentScript() tu ping + re-inject neu content script cu/chua co
+ *   - Retry toi AUTO_TAB_RETRY lan neu trang chua san sang (loi loading)
+ *   - Content tra {posts, sent} -> badge OK/ERR; tab tu dong dong qua
+ *     AUTO_TAB_DONE (handler rieng)
+ *   - Xoa badge sau 5s
+ *
+ * @param {number} tabId - ID tab auto can xu ly
+ * @returns {Promise<void>}
+ */
+async function handleAutoTab(tabId) {
+  try {
+    chrome.action.setBadgeText({ tabId, text: "FB" });
+    chrome.action.setBadgeBackgroundColor({ tabId, color: "#1877F2" });
+    await new Promise((resolve) => setTimeout(resolve, AUTO_TAB_SETTLE_MS));
+
+    let resp = null;
+    for (let attempt = 0; attempt < AUTO_TAB_RETRY; attempt++) {
+      try {
+        await ensureContentScript(tabId);
+        resp = await chrome.tabs.sendMessage(tabId, { type: "AUTO_TAB" });
+        break;
+      } catch (_err) {
+        // Tab con loading / content script chua san - thu lai sau 2s
+        if (attempt < AUTO_TAB_RETRY - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
+    }
+    if (resp) {
+      const ok = resp.posts > 0 && resp.sent && resp.sent.ok;
+      chrome.action.setBadgeText({ tabId, text: ok ? "OK" : "ERR" });
+      chrome.action.setBadgeBackgroundColor({ tabId, color: ok ? "#188038" : "#D93025" });
+    }
+  } catch (_err) {
+    // Loi ngoai le - tab co the da bi dong, bo qua
+  } finally {
+    handledAutoTabs.delete(tabId);
+    setTimeout(() => {
+      chrome.action.setBadgeText({ text: "" }).catch(() => {});
+    }, 5000);
+  }
+}
+
+// Phat hien tab auto ngay khi duoc mo (window.open tu web hoac dan tay URL)
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (info.url && info.url.includes("closetab=true") && !handledAutoTabs.has(tabId)) {
+    handledAutoTabs.add(tabId);
+    handleAutoTab(tabId);
+  }
+});
 
 /**
  * Cho tab load xong (status=complete) hoac het thoi gian timeout.
